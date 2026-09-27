@@ -17,8 +17,11 @@ function M.setup()
     require("codemap").open()
   end, { desc = "Code Map (调用关系)" })
 
+  -- gt 而不是 <leader>ct: g 前缀在 LazyVim 里是查看符号信息那一族(gd 定义,
+  -- gy 类型定义, gK 签名), 类型链排进去更顺手. 原生 vim 的 gt 是切 tab 页,
+  -- 但这里用 bufferline 管缓冲区(<S-h>/<S-l>), tab 页用不到.
   require("typechain").setup()
-  vim.keymap.set("n", "<leader>ct", function()
+  vim.keymap.set("n", "gt", function()
     require("typechain").open()
   end, { desc = "Type Chain (当前行类型链)" })
 

@@ -50,7 +50,7 @@ jumplist, `<C-o>` 可回), `d` 展开完整文档, `r` 重查, `q` 关闭, `g?` 
 
 不绑定 Rust, 任何支持 callHierarchy 的 LSP 都能用.
 
-### typechain -- `<leader>ct`
+### typechain -- `gt`
 
 光标所在行每个子表达式的类型.
 
