@@ -11,3 +11,9 @@ require("config.modules").setup()
 vim.keymap.set({ "n", "t" }, "<C-j>", function()
   Snacks.terminal.toggle(nil, { cwd = LazyVim.root() })
 end, { desc = "Terminal (Root Dir)" })
+
+-- Commits that touched the current line, the equivalent of git log -L.
+-- <leader>gf already covers the whole file; this narrows it to one line.
+vim.keymap.set("n", "<leader>gH", function()
+  Snacks.picker.git_log_line()
+end, { desc = "Git Log (current line)" })

@@ -113,6 +113,12 @@ it, `setup({ source = "both" })` enables both.
 Also: `:MouseBlameLine` queries the cursor line without waiting,
 `:MouseBlameToggle` turns it off.
 
+gitsigns annotates the end of the cursor line with author and summary, which is
+the other half of what GitLens shows. Both fire on the same CursorHold; the
+annotation is glanceable and the popup adds the commit body. Drop either with
+`:Gitsigns toggle_current_line_blame` or `:MouseBlameToggle`. `<leader>gH` lists
+the commits that touched the current line, `<leader>gf` the whole file.
+
 ### funcsig
 
 The enclosing function's signature in the winbar, prefixed with the impl context

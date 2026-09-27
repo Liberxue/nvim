@@ -102,9 +102,13 @@ mapping.
 | `<leader>ghB` | blame the whole file |
 | `<leader>gd` | hunk diff |
 | `<leader>gf` | history of the current file |
+| `<leader>gH` * | history of the current line, git log -L |
 | `<leader>gL` | log |
 | `<leader>gB` | open in the browser |
 | `]h` / `[h` | next / previous hunk |
+
+The author and summary at the end of the cursor line come from gitsigns.
+`:Gitsigns toggle_current_line_blame` turns them off.
 
 ## Debugging `<leader>d`
 
