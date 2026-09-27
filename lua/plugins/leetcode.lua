@@ -21,6 +21,15 @@ local storage = vim.fn.stdpath("data") .. "/leetcode"
 
 -- Declarations LeetCode provides on its side but the downloaded snippet omits.
 local preamble = {
+  -- Inner attribute, so it has to lead the file. Nothing may precede it, which
+  -- is why the imports below live here rather than in the injector's `imports`
+  -- field: that field would be emitted as its own section above this one.
+  "#![allow(dead_code, unused_variables, unused_mut, unused_imports)]",
+  "",
+  "use std::cell::RefCell;",
+  "use std::collections::*;",
+  "use std::rc::Rc;",
+  "",
   "pub struct Solution;",
   "",
   "#[derive(PartialEq, Eq, Clone, Debug)]",
@@ -169,19 +178,11 @@ return {
       lang = "rust",
       injector = {
         rust = {
-          -- The plugin assembles imports, then before, then the snippet, then
-          -- after. #![allow] is an inner attribute and has to lead the file, so
-          -- it goes here rather than in the preamble below.
-          --
-          -- Rc and RefCell are only needed by tree problems, but an unused
-          -- import is quieter than a missing type, and the allow covers it.
-          imports = {
-            "#![allow(dead_code, unused_variables, unused_mut, unused_imports)]",
-            "",
-            "use std::rc::Rc;",
-            "use std::cell::RefCell;",
-            "use std::collections::*;",
-          },
+          -- No `imports` field on purpose. leetcode.nvim merges it with the
+          -- per-language defaults in config/imports.lua, which covers python,
+          -- java and cpp but not rust, and the merge calls ipairs on that nil
+          -- without a guard. Supplying imports for rust crashes the picker
+          -- before a question ever opens.
           before = preamble,
           -- Solutions have no entry point of their own.
           after = { "fn main() {}" },
