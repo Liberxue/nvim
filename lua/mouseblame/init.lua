@@ -1,13 +1,19 @@
--- mouseblame: 鼠标停在某一行上, 浮窗显示这行的 git 提交信息
+-- mouseblame: 光标停在某一行上, 浮窗显示这行的 git 提交信息
 --
--- 依赖终端把「无按键的鼠标移动」上报给 nvim(xterm 的 1003 any-event 模式).
--- nvim 侧靠 'mousemoveevent' + <MouseMove> 映射接收；终端不支持时什么都不会发生,
--- 用 :MouseBlameDebug 可以判断事件到底有没有到.
+-- 触发源是 CursorHold, 不是鼠标. 鼠标悬停要求终端上报无按键的鼠标移动
+-- (xterm 1003 any-event), Warp 不上报, :MouseBlameDebug 三秒内收不到任何
+-- <MouseMove>. 所以默认走光标停留; 终端支持的话把 source 设成 "mouse" 或
+-- "both" 就能同时用鼠标.
+--
+-- 停留时长取 'updatetime', LazyVim 已把它设为 200ms. 这里不动它, 那是全局设置,
+-- trouble.nvim 等插件也挂在同一个事件上.
 
 local M = {}
 
 local config = {
-  delay = 350, -- 鼠标停住多久才去查(ms)
+  -- "cursor" 光标停留触发, "mouse" 鼠标悬停触发, "both" 两个都要
+  source = "cursor",
+  delay = 120, -- CursorHold 之后再等多久才发 git(ms), 吸收连续移动
   max_width = 96,
   body_lines = 8, -- commit message 正文最多显示几行
   ignore_ft = { codemap = true, ["snacks_terminal"] = true, ["neo-tree"] = true, help = true },
@@ -150,7 +156,7 @@ local function show(rows, anchor)
     })
   end
 
-  -- screenrow/screencol 是 1 基；relative=editor 的 row/col 是 0 基
+  -- screenrow/screencol 是 1 基; relative=editor 的 row/col 是 0 基
   local row = anchor.screenrow -- 放在鼠标下一行
   if row + h + 2 > vim.o.lines then
     row = math.max(0, anchor.screenrow - h - 3) -- 放不下就翻到上方
@@ -291,7 +297,42 @@ function M.on_move()
   )
 end
 
---- 不依赖鼠标: 查光标所在行. 终端不上报鼠标移动时用这个兜底.
+--- CursorHold 触发: 查光标所在行. 比 M.line 多了防抖和去重, 光标还停在同一行
+--- 时不会重复发 git.
+function M.on_hold()
+  if not enabled then
+    return
+  end
+  local w = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_config(w).relative ~= "" then
+    return -- 光标在浮窗里
+  end
+  local b = vim.api.nvim_win_get_buf(w)
+  if not eligible(b) then
+    return
+  end
+  local lnum = vim.api.nvim_win_get_cursor(w)[1]
+  if last and last.winid == w and last.line == lnum then
+    return -- 这一行查过了
+  end
+  hide()
+  last = { winid = w, line = lnum, screenrow = vim.fn.screenrow(), screencol = vim.fn.screencol() }
+  local anchor = last
+  stop_timer()
+  timer = uv.new_timer()
+  timer:start(
+    config.delay,
+    0,
+    vim.schedule_wrap(function()
+      stop_timer()
+      if last == anchor and vim.api.nvim_win_is_valid(anchor.winid) then
+        blame(b, anchor)
+      end
+    end)
+  )
+end
+
+--- 立即查光标所在行, 不等停留. 供 :MouseBlameLine 用.
 function M.line()
   local b = vim.api.nvim_get_current_buf()
   if not eligible(b) then
@@ -313,10 +354,31 @@ function M.enable()
     return
   end
   enabled = true
-  vim.o.mousemoveevent = true
-  vim.keymap.set({ "n", "i", "v" }, "<MouseMove>", M.on_move, { silent = true, desc = "Mouse blame hover" })
   local g = vim.api.nvim_create_augroup("mouseblame", { clear = true })
-  for _, ev in ipairs({ "CursorMoved", "CursorMovedI", "WinScrolled", "BufLeave", "InsertCharPre" }) do
+
+  if config.source == "mouse" or config.source == "both" then
+    vim.o.mousemoveevent = true
+    vim.keymap.set({ "n", "i", "v" }, "<MouseMove>", M.on_move, { silent = true, desc = "Mouse blame hover" })
+  end
+
+  if config.source == "cursor" or config.source == "both" then
+    vim.api.nvim_create_autocmd("CursorHold", { group = g, callback = M.on_hold })
+  end
+
+  -- CursorMoved 在 CursorHold 之前到. 只有真的换了行才清 last, 否则同一行上
+  -- 反复停留会反复发 git.
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    group = g,
+    callback = function()
+      local w = vim.api.nvim_get_current_win()
+      local lnum = vim.api.nvim_win_get_cursor(w)[1]
+      if last and (last.winid ~= w or last.line ~= lnum) then
+        last = nil
+      end
+      hide()
+    end,
+  })
+  for _, ev in ipairs({ "CursorMovedI", "InsertEnter", "WinScrolled", "BufLeave" }) do
     vim.api.nvim_create_autocmd(ev, {
       group = g,
       callback = function()
@@ -331,7 +393,9 @@ function M.disable()
   enabled = false
   hide()
   last = nil
-  pcall(vim.keymap.del, { "n", "i", "v" }, "<MouseMove>")
+  if config.source == "mouse" or config.source == "both" then
+    pcall(vim.keymap.del, { "n", "i", "v" }, "<MouseMove>")
+  end
   pcall(vim.api.nvim_del_augroup_by_name, "mouseblame")
 end
 
@@ -347,6 +411,14 @@ end
 
 --- 判断终端到底有没有把鼠标移动事件报上来
 function M.debug()
+  if config.source == "cursor" then
+    vim.notify(
+      "mouseblame: 当前触发源是光标停留(CursorHold), 不用鼠标.\n"
+        .. ' 要测鼠标先 setup({ source = "both" }).',
+      vim.log.levels.INFO
+    )
+    return
+  end
   if not enabled then
     M.enable()
   end

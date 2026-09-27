@@ -2,7 +2,7 @@
 --
 -- 数据全部来自 LSP(hover / references / callHierarchy), 不联网、不调模型.
 -- 渲染在浮窗里做纯文本布局, 节点按行逐帧淡入(靠 extmark 把前景色从背景色
--- 插值到目标色实现, 所以需要 termguicolors；没开则自动退化为直接显示).
+-- 插值到目标色实现, 所以需要 termguicolors; 没开则自动退化为直接显示).
 
 local M = {}
 
@@ -372,7 +372,7 @@ local function flatten(nodes, depth, prefix, out)
   end
 end
 
---- 一列的所有行；返回 {lines = {Line...}, nav = {node...}}
+--- 一列的所有行; 返回 {lines = {Line...}, nav = {node...}}
 local function column_lines(s, col, width)
   local lines, nav = {}, {}
   local open = col.open ~= false
@@ -748,7 +748,7 @@ function M._render(s, animated)
     col = math.floor((vim.o.columns - W) / 2),
   })
 
-  -- 焦点列空了就换到另一列；两列都空则保持原样(否则加载中的空面板会把焦点甩到 c2)
+  -- 焦点列空了就换到另一列; 两列都空则保持原样(否则加载中的空面板会把焦点甩到 c2)
   if #(s.nav[s.focus.key] or {}) == 0 then
     local other = s.focus.key == "c1" and "c2" or "c1"
     if #(s.nav[other] or {}) > 0 then
