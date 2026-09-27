@@ -118,6 +118,53 @@ return {
       "MunifTanjim/nui.nvim",
       "nvim-tree/nvim-web-devicons",
     },
+    config = function(_, opts)
+      require("leetcode").setup(opts)
+
+      -- plenary.curl gives every request 10 seconds. A cross-border call to
+      -- leetcode.com, especially one that lands on a Cloudflare check, runs
+      -- past that often enough to matter, and when it does plenary raises from
+      -- inside the job. Two things go wrong then: the failure arrives as a
+      -- stack traceback rather than a message, and the traceback prints the
+      -- whole curl command, LEETCODE_SESSION and csrftoken included. Those are
+      -- live credentials and they end up in the message history.
+      --
+      -- Wrapping plenary rather than leetcode.api.utils: requiring the latter
+      -- from here runs before setup has filled in config.storage, and its
+      -- cookie module indexes that at load time.
+      local curl = require("plenary.curl")
+      for _, method in ipairs({ "get", "post", "put" }) do
+        local uncaught = curl[method]
+        curl[method] = function(a, b)
+          -- plenary takes either (url, opts) or (opts)
+          local o = type(a) == "table" and a or b
+          local url = type(a) == "string" and a or (type(o) == "table" and o.url or nil)
+          local ours = type(url) == "string" and url:match("leetcode%.") ~= nil
+          if not ours then
+            return uncaught(a, b)
+          end
+          if type(o) == "table" then
+            o.timeout = o.timeout or 30000
+          end
+          local ok, res = pcall(uncaught, a, b)
+          if ok then
+            return res
+          end
+          -- Shaped so the plugin's own error handling can read it. Status 400
+          -- rather than a 5xx on purpose: its retry check fires at 500 and
+          -- would spend another five timeouts getting nowhere. exit stays 0
+          -- because the check compares err.status without a nil guard, and the
+          -- non-zero branch never sets one.
+          return {
+            exit = 0,
+            status = 400,
+            body = vim.json.encode({
+              errors = { { message = "leetcode.com did not answer within 30s" } },
+            }),
+          }
+        end
+      end
+    end,
     opts = {
       lang = "rust",
       injector = {
