@@ -46,6 +46,7 @@ return {
       -- The element has to exist before setup validates the layout that names
       -- it, and dap-ui refuses a layout referring to an unknown element.
       require("dapdisasm").setup()
+      require("dapunwrap").setup()
       return vim.tbl_deep_extend("force", opts or {}, {
         render = {
           -- Drop the type. The value already carries the shape for Rust:
