@@ -27,6 +27,18 @@ git clone <本仓库地址> ~/.config/nvim
 - `:checkhealth`
 - `:MouseBlameDebug` 判断终端上不上报鼠标移动
 
+## 快捷键
+
+常用键位见 [KEYMAPS.md](KEYMAPS.md), 由运行中的 nvim 导出后整理. 四个自写模块
+的入口:
+
+| 键 | 作用 |
+| --- | --- |
+| `gt` | 当前行每个子表达式的类型 |
+| `<leader>cg` | 光标处符号的调用关系 |
+| 光标停留 | 该行的 git 提交信息, 无需按键 |
+| winbar | 光标所在函数的签名, 自动 |
+
 ## 自写模块
 
 ### codemap -- `<leader>cg`
@@ -102,6 +114,7 @@ ApiResponse<T>  ·  pub fn ok(data: T) -> Self
 | 键 | 本配置 | 被覆盖的 LazyVim 默认 |
 | --- | --- | --- |
 | `<C-j>` | 开关浮动终端 | 切到下方窗口(改用内置 `<C-w>j`) |
+| `gt` | 类型链 | vim 的切 tab 页, 这里用不到 |
 
 `<C-j>` 在终端模式下也绑了, 所以 Ctrl-J 不再透传给 shell. 要留给 shell 就在
 `lua/config/keymaps.lua` 里删掉 `"t"`, 改用 LazyVim 自带的 `<C-/>` 退出终端.
@@ -119,6 +132,7 @@ Rust 场景下 `<leader>dr` 是 rustaceanvim 的 buffer-local 映射(列出可�
 
 ```
 init.lua                 入口
+KEYMAPS.md               快捷键
 lazyvim.json             启用的 extras, 必须提交
 lazy-lock.json           插件版本锁, 必须提交
 lua/config/lazy.lua      lazy.nvim 引导
