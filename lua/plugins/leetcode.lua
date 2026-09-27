@@ -68,6 +68,61 @@ local preamble = {
   "use leet_prelude::*;",
 }
 
+--- rust-analyzer inserts an import at the top level of the file, and the top
+--- level is outside the `@leet` markers -- only what sits between them is
+--- submitted. So `<leader>ca` on a missing HashMap fixes the buffer and leaves
+--- the submission still failing on LeetCode's compiler for the same import.
+---
+--- Moving those lines into the code section on save keeps the two in step. Only
+--- `use` statements between the preamble and `@leet start` are touched;
+--- anything inside the prelude module or the section itself is left alone.
+local function relocate_imports(buf)
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local start_i, end_i
+  for i, l in ipairs(lines) do
+    if not start_i and l:match("^//%s*@leet start") then
+      start_i = i
+    elseif not end_i and l:match("^//%s*@leet end") then
+      end_i = i
+    end
+  end
+  if not (start_i and end_i) then
+    return
+  end
+
+  local moved, kept = {}, {}
+  local depth = 0
+  for i = 1, start_i - 1 do
+    local l = lines[i]
+    -- Track braces so the prelude module's own imports stay where they are.
+    local open = select(2, l:gsub("{", ""))
+    local close = select(2, l:gsub("}", ""))
+    local at_top = depth == 0
+    depth = depth + open - close
+    if at_top and l:match("^use%s") and not l:match("^use%s+leet_prelude") then
+      moved[#moved + 1] = l
+    else
+      kept[#kept + 1] = l
+    end
+  end
+  if #moved == 0 then
+    return
+  end
+
+  local out = {}
+  vim.list_extend(out, kept)
+  out[#out + 1] = lines[start_i]
+  vim.list_extend(out, moved)
+  for i = start_i + 1, #lines do
+    out[#out + 1] = lines[i]
+  end
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, out)
+  vim.notify(
+    ("leetcode: moved %d import%s inside the submitted section"):format(#moved, #moved > 1 and "s" or ""),
+    vim.log.levels.INFO
+  )
+end
+
 --- One bin target per solution file. Names come from the filename, which
 --- contains dots and so cannot be a target name as is.
 local function target_name(file)
@@ -218,6 +273,14 @@ return {
       pcall(write_manifest)
 
       -- BufReadPre rather than BufReadPost, for the same reason.
+      vim.api.nvim_create_autocmd("BufWritePre", {
+        group = group,
+        pattern = storage .. "/*.rs",
+        callback = function(a)
+          pcall(relocate_imports, a.buf)
+        end,
+      })
+
       vim.api.nvim_create_autocmd({ "BufReadPre", "BufWritePost" }, {
         group = group,
         pattern = storage .. "/*.rs",
