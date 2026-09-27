@@ -67,6 +67,25 @@ shows whether a client has attached.
 | `<leader>cl` | LSP info |
 | `<leader>cm` | Mason |
 | `<leader>cc` | run codelens |
+| `<leader>ce` * | compile on godbolt |
+| `<leader>cE` * | compile on godbolt, live |
+| `<leader>cw` * | open godbolt in the browser |
+
+Rust adds these, all from rust-analyzer through rustaceanvim:
+
+| Key | Does |
+| --- | --- |
+| `<leader>cx` | expand the macro under the cursor |
+| `<leader>cp` | jump to the parent module |
+| `<leader>cD` | open docs.rs for the symbol |
+| `<leader>cT` | open Cargo.toml |
+| `<leader>cy` | syntax tree |
+| `<leader>cI` / `<leader>cH` | view MIR / HIR |
+| `<leader>cj` | join lines |
+| `<leader>cP` | rebuild proc macros |
+
+`gd` on a macro lands on its definition, which for a derive or proc macro is not
+where the generated code is; `<leader>cx` runs the expansion instead.
 
 In Rust, rustaceanvim rebinds `<leader>cR` to code action as a buffer-local
 mapping.

@@ -160,9 +160,38 @@ costs the language server nothing and works before the index is ready.
 Drop the `"t"` in `lua/config/keymaps.lua` to give it back and use LazyVim's
 `<C-/>` to leave the terminal.
 
+## CUDA
+
+`.cu` and `.cuh` get treesitter highlighting and clangd, which parses them as
+CUDA. Nothing compiles or runs locally: this machine has Intel graphics, and
+macOS has had no NVIDIA support since 10.13.
+
+clangd needs the CUDA headers to resolve `__global__`, `blockIdx` and the
+runtime API. Without a toolkit it reports seven errors on a fifteen-line kernel
+and any real diagnostic is lost among them. `stubs/cuda_stub.h` declares enough
+to parse cleanly -- `__global__` maps to `__attribute__((global))` rather than
+to nothing, or every `<<<>>>` reads as a call to a non-kernel, and the builtin
+variables are `__device__`, or reading them inside a kernel is an error.
+
+In a project with no compile database, `:CudaInit` writes a `compile_flags.txt`
+pointing at the stub. A project with a real toolkit ships
+`compile_commands.json`, which clangd prefers, so this stays out of the way.
+
+`:CECompile` sends the buffer to godbolt, which has 156 CUDA compilers. That is
+the only way to see generated PTX or SASS here.
+
 ## LazyVim extras
 
-Listed in `lazyvim.json`: `lang.rust`, `lang.toml`, `dap.core`.
+Listed in `lazyvim.json`: `lang.rust`, `lang.toml`, `lang.clangd`, `lang.cmake`,
+`lang.markdown`, `dap.core`.
+
+`lang.markdown` brings render-markdown.nvim, which renders headings and tables
+in the buffer, markdown-preview.nvim for a browser view, marksman, and
+markdownlint-cli2 with prettier through conform.
+
+`lang.clangd` covers C, C++ and CUDA, and wires codelldb for debugging. On macOS
+codelldb is the working choice: gdb needs codesigning to control a process and
+is awkward to get running, while codelldb is already installed for Rust.
 
 `dap.core` brings nvim-dap, nvim-dap-ui and nvim-dap-virtual-text. With codelldb
 from `lang.rust`, stopping at a breakpoint shows each variable's actual value as
@@ -189,6 +218,7 @@ lua/hoverdoc/
 lua/mouseblame/
 lua/funcsig/
 scripts/bootstrap.sh     install on a new machine
+stubs/cuda_stub.h        CUDA declarations for clangd, editor only
 ```
 
 ## Environment notes
