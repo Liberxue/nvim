@@ -229,6 +229,34 @@ return {
         end,
       })
 
+      -- `cargo run` with no argument works only while a single solution
+      -- exists; the second one makes it ask which binary to run. This picks the
+      -- target belonging to the current buffer.
+      vim.api.nvim_create_user_command("LeetRun", function(a)
+        local file = vim.api.nvim_buf_get_name(0)
+        if vim.fs.dirname(file) ~= storage or not file:match("%.rs$") then
+          vim.notify("LeetRun: not a LeetCode solution buffer", vim.log.levels.WARN)
+          return
+        end
+        write_manifest()
+        local bin = target_name(vim.fs.basename(file))
+        local cmd = { "cargo", "run", "--quiet", "--bin", bin }
+        if a.args ~= "" then
+          vim.list_extend(cmd, { "--", a.args })
+        end
+        vim.notify("LeetRun: " .. table.concat(cmd, " "), vim.log.levels.INFO)
+        vim.system(cmd, { cwd = storage, text = true }, function(res)
+          vim.schedule(function()
+            local body = (res.stdout or "") .. (res.stderr or "")
+            if body:match("%S") then
+              vim.notify(body, res.code == 0 and vim.log.levels.INFO or vim.log.levels.ERROR)
+            else
+              vim.notify("LeetRun: exit " .. res.code, vim.log.levels.INFO)
+            end
+          end)
+        end)
+      end, { nargs = "*", desc = "cargo run the solution in this buffer" })
+
       vim.api.nvim_create_user_command("LeetCargo", function()
         local changed = write_manifest()
         reload_workspace()
