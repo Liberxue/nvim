@@ -110,8 +110,22 @@ local function write_manifest()
 
   local path = storage .. "/Cargo.toml"
   local existing = vim.fn.filereadable(path) == 1 and vim.fn.readfile(path) or {}
-  if table.concat(existing, "\n") ~= table.concat(lines, "\n") then
-    vim.fn.writefile(lines, path)
+  if table.concat(existing, "\n") == table.concat(lines, "\n") then
+    return false
+  end
+  vim.fn.writefile(lines, path)
+  return true
+end
+
+--- rust-analyzer decides how to treat a file when it attaches. Opening a
+--- solution before the manifest existed leaves it checking that one .rs as a
+--- standalone cargo script forever, which is where the "Cargo watcher failed"
+--- and "-Z is only accepted on the nightly compiler" errors come from. A new
+--- problem has the same effect in reverse: the bin target is added to the
+--- manifest but the running server knows nothing about it.
+local function reload_workspace()
+  for _, client in ipairs(vim.lsp.get_clients({ name = "rust-analyzer" })) do
+    client:request("rust-analyzer/reloadWorkspace", nil, function() end)
   end
 end
 
@@ -191,17 +205,30 @@ return {
     },
     init = function()
       local group = vim.api.nvim_create_augroup("leetcode_cargo", { clear = true })
-      vim.api.nvim_create_autocmd({ "BufWritePost", "BufReadPost" }, {
+      -- Written at startup, not only when a solution is opened: the manifest
+      -- has to be on disk before rust-analyzer attaches to the first one.
+      pcall(write_manifest)
+
+      -- BufReadPre rather than BufReadPost, for the same reason.
+      vim.api.nvim_create_autocmd({ "BufReadPre", "BufWritePost" }, {
         group = group,
         pattern = storage .. "/*.rs",
         callback = function()
-          pcall(write_manifest)
+          local ok, changed = pcall(write_manifest)
+          if ok and changed then
+            vim.schedule(reload_workspace)
+          end
         end,
       })
+
       vim.api.nvim_create_user_command("LeetCargo", function()
-        write_manifest()
-        vim.notify("LeetCargo: wrote " .. storage .. "/Cargo.toml", vim.log.levels.INFO)
-      end, { desc = "Regenerate the LeetCode Cargo.toml" })
+        local changed = write_manifest()
+        reload_workspace()
+        vim.notify(
+          changed and ("LeetCargo: wrote " .. storage .. "/Cargo.toml") or "LeetCargo: manifest already current",
+          vim.log.levels.INFO
+        )
+      end, { desc = "Regenerate the LeetCode Cargo.toml and reload rust-analyzer" })
     end,
   },
 }
