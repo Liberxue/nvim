@@ -1,25 +1,26 @@
--- codemap: 光标处符号的调用关系脑图
+-- codemap: call hierarchy for the symbol under the cursor.
 --
--- 数据全部来自 LSP(hover / references / callHierarchy), 不联网、不调模型.
--- 渲染在浮窗里做纯文本布局, 节点按行逐帧淡入(靠 extmark 把前景色从背景色
--- 插值到目标色实现, 所以需要 termguicolors; 没开则自动退化为直接显示).
+-- Everything comes from the LSP: hover, references, callHierarchy. No network,
+-- no model. Laid out as text in a floating window, with rows fading in one at a
+-- time -- extmarks interpolate the foreground from the background colour, which
+-- needs termguicolors; without it the rows simply appear.
 
 local M = {}
 
 local uv = vim.uv or vim.loop
 
 local config = {
-  width = 0.82, -- 浮窗宽度占屏比
+  width = 0.82, -- of the screen
   max_width = 120,
-  max_height = 0.72, -- 浮窗高度上限占屏比
-  doc_lines = 8, -- 文档默认最多显示行数(按 d 展开全部)
-  max_depth = 6, -- 调用链展开深度上限
-  timeout = 15000, -- 等 LSP 响应的上限, 超时就用已有数据渲染
+  max_height = 0.72, -- of the screen
+  doc_lines = 8, -- documentation lines before truncating; d shows the rest
+  max_depth = 6, -- how deep <Tab> may expand a call chain
+  timeout = 15000, -- ms to wait on the LSP before drawing with what arrived
   animate = true,
   anim = {
-    interval = 18, -- 每帧毫秒
-    stagger = 1, -- 相邻行错开几帧
-    ramp = 6, -- 单行淡入占几帧
+    interval = 18, -- ms per frame
+    stagger = 1, -- frames between one row and the next
+    ramp = 6, -- frames for one row to reach full colour
   },
 }
 
@@ -42,17 +43,18 @@ local HLS = {
 }
 
 local ns = vim.api.nvim_create_namespace("codemap")
-local st = nil ---@type table|nil 当前打开的面板状态(同时只允许一个)
+local st = nil ---@type table|nil state of the open panel; only one at a time
 
 ---------------------------------------------------------------------------
--- 文本宽度工具(extmark 用字节列, 对齐用显示宽度, 中文下两者不等)
+-- Width helpers. extmarks take byte columns while alignment needs display
+-- width, and the two differ for wide characters.
 ---------------------------------------------------------------------------
 
 local function dw(s)
   return vim.fn.strdisplaywidth(s)
 end
 
---- 截断到不超过 width 显示宽度的前缀
+--- Longest prefix that fits in width display cells
 local function cut(text, width)
   if width <= 0 then
     return ""
@@ -73,7 +75,7 @@ local function cut(text, width)
 end
 
 ---------------------------------------------------------------------------
--- Line: 带高亮分段的一行, 支持拼接 / 补齐 / 截断
+-- Line: a row of highlighted segments, with concat, pad and truncate
 ---------------------------------------------------------------------------
 
 local Line = {}
@@ -115,7 +117,7 @@ function Line:truncate(width)
     return self
   end
   local keep, w, b = {}, 0, 0
-  local budget = width - 1 -- 给省略号留一格
+  local budget = width - 1 -- leave a cell for the ellipsis
   for _, p in ipairs(self.parts) do
     local pw = dw(p.text)
     if w + pw <= budget then
@@ -147,7 +149,7 @@ function Line:build()
 end
 
 ---------------------------------------------------------------------------
--- 淡入用的插值高亮组
+-- Interpolated highlight groups used by the fade
 ---------------------------------------------------------------------------
 
 local fade_cache = {}
@@ -182,7 +184,7 @@ local function blend(fg, bg, a)
   return r * 65536 + g * 256 + b
 end
 
---- 把 group 的前景色往背景色方向插值, level 为 0..ramp
+--- Blend a group towards the background. level runs 0..ramp.
 local function fade_group(group, level)
   local ramp = config.anim.ramp
   if level >= ramp then
@@ -210,12 +212,12 @@ local function pick_client(bufnr)
   if #cs > 0 then
     return cs[1]
   end
-  -- 退一步: 至少能拿 hover 的 client
+  -- Fall back to any client that can answer hover
   cs = vim.lsp.get_clients({ bufnr = bufnr, method = "textDocument/hover" })
   return cs[1]
 end
 
---- 自己拆 hover 的 contents, 绕开各版本 util 的弃用差异
+--- Unpack hover contents directly, sidestepping deprecations across versions
 local function hover_lines(contents)
   local out = {}
   local function push(s)
@@ -241,7 +243,7 @@ local function hover_lines(contents)
   return out
 end
 
---- 从 hover 里分出「签名代码块」和「文档正文」
+--- Split hover into the signature block and the prose below it
 local function parse_hover(result)
   if not result or not result.contents then
     return nil, nil, {}
@@ -267,20 +269,21 @@ local function parse_hover(result)
   if cur then
     blocks[#blocks + 1] = cur
   end
-  -- rust-analyzer 会在 hover 里塞一行 "Implements notable traits: ...", 对脑图没用
+  -- rust-analyzer adds an "Implements notable traits" line that says nothing here
   doc = vim.tbl_filter(function(l)
     return not l:match("^%s*Implements notable traits")
   end, doc)
   while #doc > 0 and doc[#doc] == "" do
     doc[#doc] = nil
   end
-  -- rust-analyzer 的 hover 通常是 [模块路径块, 签名块], 签名取最后一块
+  -- rust-analyzer hover is usually [module path, signature], so take the last block
   local sig = #blocks > 0 and table.concat(blocks[#blocks], " "):gsub("%s+", " ") or nil
   local modpath = #blocks > 1 and vim.trim(blocks[1][1] or "") or nil
   return sig, modpath, doc
 end
 
---- 保留尾部的截断(路径要看到 file.rs:123, 而不是开头的 ~/.rustup/...)
+--- Truncate from the left. A path is worth reading at its tail, file.rs:123,
+--- not its head, ~/.rustup/...
 local function tail(text, width)
   if width <= 0 then
     return ""
@@ -306,7 +309,8 @@ local function loc_label(uri, range)
   local path = vim.uri_to_fname(uri)
   local rel = vim.fn.fnamemodify(path, ":.")
   if rel:sub(1, 1) == "/" then
-    -- 不在 cwd 下(依赖源码、rustup toolchain): 只留最后两段, 否则一行全是路径
+    -- Outside cwd (dependency sources, rustup toolchains) keep only the last
+    -- two segments, or the path eats the row
     local parts = vim.split(path, "/", { plain = true })
     local n = #parts
     rel = n >= 2 and ("…/" .. parts[n - 1] .. "/" .. parts[n]) or parts[n]
@@ -345,8 +349,9 @@ local function request(s, method, params, cb)
     if st ~= s then
       return
     end
-    -- 增量渲染: 哪个响应先到就先画哪块. hover 是毫秒级的, 所以签名和文档立刻出来,
-    -- references / callHierarchy 这两个要全 workspace 搜索的慢请求在后面自己填进去.
+    -- Draw as each response lands. hover answers in milliseconds, so the
+    -- signature and documentation appear at once; references and callHierarchy
+    -- search the whole workspace and fill in later.
     local first = not s.rendered
     s.rendered = true
     s.loading = false
@@ -358,7 +363,7 @@ local function request(s, method, params, cb)
 end
 
 ---------------------------------------------------------------------------
--- 布局
+-- Layout
 ---------------------------------------------------------------------------
 
 local function flatten(nodes, depth, prefix, out)
@@ -372,7 +377,7 @@ local function flatten(nodes, depth, prefix, out)
   end
 end
 
---- 一列的所有行; 返回 {lines = {Line...}, nav = {node...}}
+--- Rows for one column. Returns {lines = {Line...}, nav = {node...}}
 local function column_lines(s, col, width)
   local lines, nav = {}, {}
   local open = col.open ~= false
@@ -380,7 +385,7 @@ local function column_lines(s, col, width)
   head:add(open and "▾ " or "▸ ", "CodeMapSection")
   head:add(col.title, "CodeMapSection")
   if col.pending then
-    head:add(" (查询中)", "CodeMapLoc")
+    head:add(" (querying)", "CodeMapLoc")
   else
     head:add(" (" .. #col.nodes .. ")", "CodeMapCount")
   end
@@ -390,7 +395,7 @@ local function column_lines(s, col, width)
     return { lines = lines, nav = nav }
   end
   if #col.nodes == 0 then
-    lines[#lines + 1] = Line.new():add(col.pending and "  查询中" or "  (无)", "CodeMapLoc")
+    lines[#lines + 1] = Line.new():add(col.pending and "  querying" or "  (none)", "CodeMapLoc")
     return { lines = lines, nav = nav }
   end
 
@@ -452,7 +457,8 @@ local function strip_md(s)
   return s
 end
 
---- 把 references 的位置转成带源码文本的可跳转节点. 同步读文件, 所以只在真要显示时调.
+--- Turn reference locations into nodes carrying their source line. Reads files
+--- synchronously, so call it only when the list is about to be shown.
 local function build_ref_nodes(s)
   if s.ref_nodes then
     return s.ref_nodes
@@ -487,7 +493,7 @@ local function build_ref_nodes(s)
   return s.ref_nodes
 end
 
---- 生成 s.rows: 每行 {text, spans, cells}
+--- Build s.rows, each {text, spans, cells}
 local function build_rows(s, W)
   local rows = {}
   local function push(line, cells)
@@ -509,12 +515,12 @@ local function build_rows(s, W)
   local inner = W - 2
 
   if s.loading then
-    push(Line.new():add(" 正在向 " .. (s.client and s.client.name or "LSP") .. " 查询", "CodeMapLoc"))
+    push(Line.new():add(" querying " .. (s.client and s.client.name or "LSP"), "CodeMapLoc"))
     s.rows, s.nav = rows, { c1 = {}, c2 = {} }
     return
   end
 
-  -- 签名 + 位置
+  -- Signature and location
   if s.sig then
     push(Line.new():add(" "):concat(Line.new():add(s.sig, "CodeMapSig")):truncate(W))
   end
@@ -524,11 +530,11 @@ local function build_rows(s, W)
   end
   head:add(loc_label(s.root_uri, s.root_range), "CodeMapLoc")
   if s.refs then
-    head:add("  ·  ", "CodeMapLoc"):add(tostring(s.refs), "CodeMapCount"):add(" 处引用", "CodeMapLoc")
+    head:add("  ·  ", "CodeMapLoc"):add(tostring(s.refs), "CodeMapCount"):add(" references", "CodeMapLoc")
   end
   push(head:truncate(W))
 
-  -- 文档
+  -- Documentation
   if #s.doc > 0 then
     rule()
     local shown = {}
@@ -540,9 +546,9 @@ local function build_rows(s, W)
     local total = #shown
     local clipped = not s.doc_open and total > config.doc_lines
     local dh = Line.new():add(" ")
-    dh:add(s.doc_open and "▾ " or "▸ ", "CodeMapSection"):add("文档", "CodeMapSection")
+    dh:add(s.doc_open and "▾ " or "▸ ", "CodeMapSection"):add("Docs", "CodeMapSection")
     if clipped then
-      dh:add(("  (共 %d 行, 按 d 看全部)"):format(total), "CodeMapLoc")
+      dh:add(("  (%d lines, d for all)"):format(total), "CodeMapLoc")
     end
     push(dh)
     for i, dl in ipairs(shown) do
@@ -553,8 +559,9 @@ local function build_rows(s, W)
     end
   end
 
-  -- 光标在非函数符号上时 callHierarchy 是空的, 这时把「使用」摊开成单栏引用列表.
-  -- 必须等调用层级确定为空再切, 否则会先闪一下双栏再跳回来.
+  -- callHierarchy is empty for anything that is not a function, so fall back to
+  -- a single column of references. Wait until the hierarchy is known to be
+  -- empty, or the two-column layout flashes up first.
   local ch_done = s.ch_possible == false or (s.got_in and s.got_out)
   if
     not s.single
@@ -565,11 +572,11 @@ local function build_rows(s, W)
     and #(s.ref_locs or {}) > 0
   then
     s.single = true
-    s.cols.c1 = { title = "引用", kind = "reference", nodes = build_ref_nodes(s), open = true }
+    s.cols.c1 = { title = "References", kind = "reference", nodes = build_ref_nodes(s), open = true }
     s.focus.key, s.focus.idx = "c1", 1
   end
 
-  -- 两列(窄窗、或单栏模式退化成上下堆叠)
+  -- Two columns, stacked when narrow or in single-column mode
   local colw = math.floor((W - 5) / 2)
   local stacked = colw < 24 or s.single
   local nav = { c1 = {}, c2 = {} }
@@ -628,20 +635,20 @@ local function build_rows(s, W)
   local function key(k, d)
     help:add(k, "CodeMapKey"):add(" " .. d .. "  ", "CodeMapHelp")
   end
-  key("j/k", "移动")
-  key("h/l", "换列")
-  key("<Tab>", "展开")
-  key("<CR>", "跳转")
-  key("d", "文档")
-  key("r", "刷新")
-  key("q", "关闭")
+  key("j/k", "move")
+  key("h/l", "column")
+  key("<Tab>", "expand")
+  key("<CR>", "jump")
+  key("d", "docs")
+  key("r", "refresh")
+  key("q", "close")
   push(help:truncate(W))
 
   s.rows, s.nav = rows, nav
 end
 
 ---------------------------------------------------------------------------
--- 绘制
+-- Painting
 ---------------------------------------------------------------------------
 
 local function focused(s)
@@ -674,7 +681,7 @@ local function paint(s, frame)
       })
     end
   end
-  -- 焦点格
+  -- Focused cell
   local f = focused(s)
   if f then
     local row = s.rows[f.row]
@@ -748,7 +755,8 @@ function M._render(s, animated)
     col = math.floor((vim.o.columns - W) / 2),
   })
 
-  -- 焦点列空了就换到另一列; 两列都空则保持原样(否则加载中的空面板会把焦点甩到 c2)
+  -- Move focus to the other column when this one empties. With both empty,
+  -- leave it alone, or a still-loading panel throws focus to c2.
   if #(s.nav[s.focus.key] or {}) == 0 then
     local other = s.focus.key == "c1" and "c2" or "c1"
     if #(s.nav[other] or {}) > 0 then
@@ -776,7 +784,7 @@ function M._render(s, animated)
 end
 
 ---------------------------------------------------------------------------
--- 交互
+-- Interaction
 ---------------------------------------------------------------------------
 
 function M.close()
@@ -832,11 +840,11 @@ local function toggle_expand()
     return
   end
   if n._depth and n._depth >= config.max_depth then
-    vim.notify("codemap: 已到展开深度上限 " .. config.max_depth, vim.log.levels.WARN)
+    vim.notify("codemap: depth limit " .. config.max_depth .. " reached", vim.log.levels.WARN)
     return
   end
   if s.cols[s.focus.key].kind == "reference" then
-    vim.notify("codemap: 引用条目没有下级, 用 <CR> 跳转", vim.log.levels.INFO)
+    vim.notify("codemap: a reference has nothing to expand; <CR> jumps to it", vim.log.levels.INFO)
     return
   end
   local method = s.cols[s.focus.key].kind == "incoming" and "callHierarchy/incomingCalls"
@@ -849,7 +857,7 @@ local function toggle_expand()
     s.pending = s.pending - 1
     n.loading = false
     if err then
-      s.errors[#s.errors + 1] = ("%s: %s"):format(method, err.message or "失败")
+      s.errors[#s.errors + 1] = ("%s: %s"):format(method, err.message or "failed")
     else
       local kids = {}
       for _, call in ipairs(result or {}) do
@@ -938,14 +946,14 @@ local function setup_keys(s)
   end)
   map("g?", function()
     vim.notify(
-      "codemap: j/k 移动  h/l 换列  <Tab> 展开/收起  <CR> 跳转  d 文档  r 刷新  q 关闭",
+      "codemap: j/k move  h/l column  <Tab> expand  <CR> jump  d docs  r refresh  q close",
       vim.log.levels.INFO
     )
   end)
 end
 
 ---------------------------------------------------------------------------
--- 入口
+-- Entry point
 ---------------------------------------------------------------------------
 
 function M.open()
@@ -955,7 +963,7 @@ function M.open()
   local src_win = vim.api.nvim_get_current_win()
   local client = pick_client(src_buf)
   if not client then
-    vim.notify("codemap: 当前缓冲区没有支持调用层级的 LSP(先等 LSP 挂载)", vim.log.levels.WARN)
+    vim.notify("codemap: no LSP client with call hierarchy on this buffer", vim.log.levels.WARN)
     return
   end
 
@@ -981,8 +989,8 @@ function M.open()
     nav = { c1 = {}, c2 = {} },
     focus = { key = "c1", idx = 1 },
     cols = {
-      c1 = { title = "被调用", kind = "incoming", nodes = {}, open = true, pending = true },
-      c2 = { title = "调用", kind = "outgoing", nodes = {}, open = true, pending = true },
+      c1 = { title = "Callers", kind = "incoming", nodes = {}, open = true, pending = true },
+      c2 = { title = "Calls", kind = "outgoing", nodes = {}, open = true, pending = true },
     },
   }
   st = s
@@ -1074,7 +1082,7 @@ function M.open()
     if st == s and not s.rendered then
       s.rendered = true
       s.loading = false
-      s.errors[#s.errors + 1] = "LSP 响应超时, 下列为已拿到的部分数据"
+      s.errors[#s.errors + 1] = "LSP timed out; showing what arrived"
       M._render(s, true)
     end
   end, config.timeout)
@@ -1092,7 +1100,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("ColorScheme", { callback = defhl })
   vim.api.nvim_create_user_command("CodeMap", function()
     M.open()
-  end, { desc = "光标处符号的调用关系脑图" })
+  end, { desc = "Call hierarchy for the symbol under the cursor" })
 end
 
 return M

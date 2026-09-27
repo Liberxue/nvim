@@ -1,70 +1,78 @@
 # nvim
 
-基于 [LazyVim](https://github.com/LazyVim/LazyVim) 的个人配置, 主要用于 Rust.
-除 LazyVim 之外还带四个自写模块, 都在 `lua/` 下, 不是第三方插件.
+A LazyVim config, used mostly for Rust. Beyond LazyVim it carries four local
+modules under `lua/`, none of which are third-party plugins.
 
-在 Neovim 0.12.4 / macOS 上验证.
+Verified on Neovim 0.12.4, macOS.
 
-## 换机器安装
+## Installing on another machine
 
 ```sh
-git clone <本仓库地址> ~/.config/nvim
+git clone git@github.com:Liberxue/nvim.git ~/.config/nvim
 ~/.config/nvim/scripts/bootstrap.sh
 ```
 
-脚本会按 `lazy-lock.json` 把插件还原到锁定的 commit(用 `restore` 不用 `sync`,
-后者会拉最新, 两台机器就不一致了), 装 mason 工具和 treesitter parser, 并为
-**每一个**已安装的 rustup toolchain 装 rust-analyzer 组件.
+The script restores plugins to the commits in `lazy-lock.json` rather than
+syncing them, installs the mason tools and treesitter parsers, and adds the
+rust-analyzer component to **every** installed rustup toolchain.
 
-最后一件事单独说明. rust-analyzer 是 rustup 的 per-toolchain 组件, 装在 stable
-上不会让钉了具体版本的项目用上它. 项目里有 `rust-toolchain.toml` 时, LSP 起不来,
-按 `<C-]>` 只会看到 `E426: Tag not found` -- 这个报错指向 ctags, 与 LSP 无关,
-很容易误判. 脚本对所有 toolchain 都装一遍来规避.
+That last step is worth explaining. rust-analyzer is a per-toolchain rustup
+component, so installing it for stable does nothing for a project pinned by a
+`rust-toolchain.toml`. Such a project gets no language server, and `<C-]>`
+answers `E426: Tag not found` -- a ctags error that says nothing about the LSP
+and is easy to chase in the wrong direction.
 
-装完还需要手动确认:
+Left to do by hand afterwards:
 
-- 终端字体用 Nerd Font
+- a Nerd Font in the terminal
 - `:checkhealth`
-- `:MouseBlameDebug` 判断终端上不上报鼠标移动
+- `:MouseBlameDebug`, if you want blame on mouse hover rather than on hold
 
-## 快捷键
+## Keymaps
 
-常用键位见 [KEYMAPS.md](KEYMAPS.md), 由运行中的 nvim 导出后整理. 四个自写模块
-的入口:
+[KEYMAPS.md](KEYMAPS.md) lists the bindings worth remembering; it was generated
+from a running nvim. The local modules are reached through:
 
-| 键 | 作用 |
+| Key | Does |
 | --- | --- |
-| `gt` | 当前行每个子表达式的类型 |
-| `<leader>cg` | 光标处符号的调用关系 |
-| 光标停留 | 该行的 git 提交信息, 无需按键 |
-| winbar | 光标所在函数的签名, 自动 |
+| `gt` | type of every sub-expression on the current line |
+| `<leader>cg` | call hierarchy for the symbol under the cursor |
+| cursor hold | commit behind the current line |
+| winbar | signature of the enclosing function |
 
-## 自写模块
+## Local modules
 
 ### codemap -- `<leader>cg`
 
-光标处符号的调用关系, 浮窗展示, 数据全部来自 LSP.
+Call relationships for the symbol under the cursor, drawn in a floating window
+from LSP data alone.
 
-光标在**函数**上时是左右两栏: 左边 `被调用`(callHierarchy/incomingCalls),
-右边 `调用`(outgoingCalls), `<Tab>` 可以顺着调用链递归展开, 深度上限 6.
-光标在**类型, 字段, 常量**上时 callHierarchy 返回空, 这时换成单栏引用列表
-(textDocument/references), 每条带上那一行的源码.
+On a **function** it shows two columns: callers on the left
+(`callHierarchy/incomingCalls`), calls on the right (`outgoingCalls`), with
+`<Tab>` walking either chain up to six levels deep. On a **type, field or
+constant** callHierarchy comes back empty, so it falls back to a single column
+of references (`textDocument/references`), each carrying its source line.
 
-面板内按键: `j/k` 移动, `h/l` 换栏, `<Tab>` 展开, `<CR>` 跳转(跳前 `m'` 入
-jumplist, `<C-o>` 可回), `d` 展开完整文档, `r` 重查, `q` 关闭, `g?` 看键位.
+Inside the panel: `j/k` move, `h/l` switch column, `<Tab>` expands, `<CR>` jumps
+(after `m'`, so `<C-o>` comes back), `d` shows the full documentation, `r`
+requeries, `q` closes, `g?` prints the keys.
 
-增量渲染: 四个请求里 hover 是毫秒级的, references 和 incomingCalls 要全 workspace
-搜索. 所以哪个先回来就先画哪块, 未到的栏显示 `(查询中)`. 实测在 11 个调用者的
-函数上, 签名和文档 11ms 上屏, 调用关系 495ms 补齐; 改成增量之前要等满 495ms.
+It renders incrementally. Of the four requests it makes, hover answers in
+milliseconds while references and incomingCalls search the whole workspace, so
+each part is drawn as it lands and pending columns read `(querying)`. On a
+function with eleven callers the signature and documentation reach the screen in
+11ms and the call hierarchy fills in at 495ms; waiting for all four meant 495ms
+before anything appeared.
 
-节点逐行淡入是用 extmark 把前景色从背景色插值到目标色实现的, 需要
-`termguicolors`; 没开则直接显示. `setup({ animate = false })` 可关.
+Rows fade in through extmarks that interpolate the foreground from the
+background colour, which needs `termguicolors`; without it they simply appear.
+`setup({ animate = false })` turns it off.
 
-不绑定 Rust, 任何支持 callHierarchy 的 LSP 都能用.
+Nothing here is Rust-specific -- any server with callHierarchy works.
 
 ### typechain -- `gt`
 
-光标所在行每个子表达式的类型.
+The type of every sub-expression on the current line.
 
 ```
  f                                    -> Vec<&str, Global>
@@ -74,84 +82,96 @@ jumplist, `<C-o>` 可回), `d` 展开完整文档, `r` 重查, `q` 关闭, `g?` 
        |- .collect()                  -> Vec<&str, Global>
 ```
 
-依赖 rust-analyzer 的一个非标准扩展: `textDocument/hover` 的 `position` 传
-Range 时返回那一段表达式的类型. LSP 标准的 hover 只接受单个位置, 在
-`line.split(',').map(f).collect()` 上无论点哪里都只会返回 `line` 的类型.
+This rests on an extension rust-analyzer offers: `textDocument/hover` accepts a
+Range where the spec says position, and answers with the type of that span.
+Standard hover takes a single position, so on
+`line.split(',').map(f).collect()` every position in the chain answers with the
+type of `line`.
 
-子表达式由 treesitter 切分, 并过滤掉冗余节点 -- `line.split` 这种「调用的函数
-部分」与 `line.split(',')` 类型完全相同, 不重复列出. 链式调用自动缩进并只显示
-增量, 不必在重复前缀里找差异.
+treesitter splits the line into sub-expressions, minus the redundant ones -- the
+callee half of a call, `line.split`, has the same type as `line.split(',')` and
+is not listed twice. Chained calls are indented and show only what each step
+adds, so the differences are not buried in a shared prefix.
 
-别的语言服务器不认 Range 时会退化成按起点返回, 输出价值降低但不会出错.
+A server without the Range extension degrades to answering by start position:
+less useful, not an error.
 
 ### mouseblame
 
-鼠标停在某行上 350ms, 浮窗显示该行的 git 提交信息.
+The commit behind the line the cursor rests on, after 200ms.
 
-`git blame -L n,n --porcelain` 异步取 sha, 作者, 时间和 subject, 先画一次;
-随后 `git log -1 --format=%b` 把 commit body 追加进去, 浮窗自动长高.
-缓冲区有未保存改动时会提示行号可能与 blame 不一致, 因为 blame 读的是磁盘文件.
+`git blame -L n,n --porcelain` fetches sha, author, time and subject
+asynchronously and draws once; `git log -1 --format=%b` then appends the commit
+body and the popup grows. A modified buffer gets a warning that the line numbers
+may not line up, since blame reads the file on disk.
 
-依赖终端上报无按键的鼠标移动(xterm 1003 any-event). 终端不支持时不会报错,
-只是什么都不发生. 用 `:MouseBlameDebug` 判断; 不支持就用 `:MouseBlameLine`
-查光标行, 或 gitsigns 的 `<leader>ghb`.
+The trigger is CursorHold. Mouse hover needs the terminal to report motion with
+no button held (xterm 1003 any-event), which Warp does not do -- there
+`:MouseBlameDebug` sees no `<MouseMove>` at all. On a terminal that does report
+it, `setup({ source = "both" })` enables both.
 
-其他命令: `:MouseBlameToggle`.
+Also: `:MouseBlameLine` queries the cursor line without waiting,
+`:MouseBlameToggle` turns it off.
 
 ### funcsig
 
-winbar 常驻显示光标所在函数的签名, 在 impl 块内会带上类型上下文:
+The enclosing function's signature in the winbar, prefixed with the impl context
+where there is one:
 
 ```
 ApiResponse<T>  ·  pub fn ok(data: T) -> Self
 ```
 
-走 treesitter 不走 LSP, 光标移动时重算不给语言服务器加负担, 也不受索引状态影响.
-`:FuncSigToggle` 可关.
+It reads treesitter rather than the LSP, so recomputing it on every cursor move
+costs the language server nothing and works before the index is ready.
+`:FuncSigToggle` turns it off.
 
-## 覆盖的默认键位
+## Overridden defaults
 
-| 键 | 本配置 | 被覆盖的 LazyVim 默认 |
+| Key | Here | LazyVim default |
 | --- | --- | --- |
-| `<C-j>` | 开关浮动终端 | 切到下方窗口(改用内置 `<C-w>j`) |
-| `gt` | 类型链 | vim 的切 tab 页, 这里用不到 |
+| `<C-j>` | floating terminal | window down (use `<C-w>j`) |
+| `gt` | type chain | vim's tab paging, unused here |
 
-`<C-j>` 在终端模式下也绑了, 所以 Ctrl-J 不再透传给 shell. 要留给 shell 就在
-`lua/config/keymaps.lua` 里删掉 `"t"`, 改用 LazyVim 自带的 `<C-/>` 退出终端.
+`<C-j>` is bound in terminal mode too, so Ctrl-J no longer reaches the shell.
+Drop the `"t"` in `lua/config/keymaps.lua` to give it back and use LazyVim's
+`<C-/>` to leave the terminal.
 
-## 启用的 LazyVim extras
+## LazyVim extras
 
-见 `lazyvim.json`. 当前为 `lang.rust`, `lang.toml`, `dap.core`.
+Listed in `lazyvim.json`: `lang.rust`, `lang.toml`, `dap.core`.
 
-`dap.core` 带来 nvim-dap, nvim-dap-ui 和 nvim-dap-virtual-text; 配合
-`lang.rust` 装的 codelldb, 断点停住后变量的实际值会以虚拟文本显示在行尾.
-Rust 场景下 `<leader>dr` 是 rustaceanvim 的 buffer-local 映射(列出可调试目标),
-会盖掉 dap.core 的 Toggle REPL.
+`dap.core` brings nvim-dap, nvim-dap-ui and nvim-dap-virtual-text. With codelldb
+from `lang.rust`, stopping at a breakpoint shows each variable's actual value as
+virtual text at the end of its line. In Rust, `<leader>dr` is a buffer-local
+rustaceanvim mapping that lists debuggable targets, shadowing dap.core's
+Toggle REPL.
 
-## 目录
+## Layout
 
 ```
-init.lua                 入口
-KEYMAPS.md               快捷键
-lazyvim.json             启用的 extras, 必须提交
-lazy-lock.json           插件版本锁, 必须提交
-lua/config/lazy.lua      lazy.nvim 引导
-lua/config/modules.lua   四个自写模块的装载
-lua/config/keymaps.lua   键位
-lua/config/options.lua   选项
-lua/config/autocmds.lua  autocmd
-lua/plugins/             插件覆盖
-lua/codemap/             自写模块
+init.lua                 entry point
+KEYMAPS.md               keymaps
+lazyvim.json             enabled extras, must be committed
+lazy-lock.json           plugin versions, must be committed
+lua/config/lazy.lua      lazy.nvim bootstrap
+lua/config/modules.lua   loads the four local modules
+lua/config/keymaps.lua   keymaps
+lua/config/options.lua   options
+lua/config/autocmds.lua  autocmds
+lua/plugins/             plugin overrides
+lua/codemap/             local modules
 lua/typechain/
 lua/mouseblame/
 lua/funcsig/
-scripts/bootstrap.sh     新机器安装
+scripts/bootstrap.sh     install on a new machine
 ```
 
-## 已知环境限制
+## Environment notes
 
-- Warp 不支持 kitty graphics 协议, 也不支持 sixel, nvim 里无法内联显示图片.
-  `snacks.image` 的 `force = true` 只是跳过能力检测, 不会让它真的画出来.
-  需要内联图片就换 Ghostty, kitty 或 WezTerm.
-- 同一个 rustc 版本在 rustup 里可能存在两个独立 toolchain(`stable` 与 `1.96.0`),
-  组件要分别安装. 见上面安装一节.
+- Warp supports neither the kitty graphics protocol nor sixel, so images cannot
+  render inline in nvim there. `snacks.image` with `force = true` only skips the
+  capability check; it does not make the image appear. Ghostty, kitty or WezTerm
+  do work.
+- One rustc version can exist as two separate rustup toolchains (`stable` and
+  `1.96.0`), each needing its own components. See the install section.

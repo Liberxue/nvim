@@ -1,38 +1,41 @@
--- 本仓库自带的四个本地模块, 都不是第三方插件.
+-- Four modules that live in this repo rather than coming from a plugin manager.
 --
---   codemap     <leader>cg   光标处符号的调用关系脑图
---   typechain   <leader>ct   当前行每个子表达式的类型
---   mouseblame  鼠标悬停       该行的 git 提交信息
---   funcsig     winbar        光标所在函数的签名
+--   codemap     <leader>cg   call hierarchy for the symbol under the cursor
+--   typechain   gt           type of every sub-expression on the current line
+--   mouseblame  cursor hold  commit behind the current line
+--   funcsig     winbar       signature of the enclosing function
 --
--- 写成普通 lua 模块而不是 lazy.nvim 的本地插件规格, 是因为四个模块共用
--- stdpath("config") 这一个目录, 而 lazy 以 dir 为键, 四条规格会互相冲突.
+-- Plain lua modules rather than lazy.nvim local plugin specs: all four would
+-- share stdpath("config") as their dir, and lazy keys plugins by dir, so the
+-- four specs would collide.
 
 local M = {}
 
 function M.setup()
-  -- 按键触发的两个
+  -- Key-triggered
   require("codemap").setup()
   vim.keymap.set("n", "<leader>cg", function()
     require("codemap").open()
-  end, { desc = "Code Map (调用关系)" })
+  end, { desc = "Code Map (call hierarchy)" })
 
-  -- gt 而不是 <leader>ct: g 前缀在 LazyVim 里是查看符号信息那一族(gd 定义,
-  -- gy 类型定义, gK 签名), 类型链排进去更顺手. 原生 vim 的 gt 是切 tab 页,
-  -- 但这里用 bufferline 管缓冲区(<S-h>/<S-l>), tab 页用不到.
+  -- gt rather than <leader>ct: the g prefix is where LazyVim keeps symbol
+  -- lookups (gd definition, gy type definition, gK signature), and a type chain
+  -- belongs with them. gt paged through tabs in vim, but buffers are handled by
+  -- bufferline here (<S-h>/<S-l>), so nothing used it.
   require("typechain").setup()
   vim.keymap.set("n", "gt", function()
     require("typechain").open()
-  end, { desc = "Type Chain (当前行类型链)" })
+  end, { desc = "Type Chain (current line)" })
 
-  -- 事件驱动的两个, 必须在启动时就把 autocmd 挂上
+  -- Event-driven, so their autocmds have to be installed at startup.
   --
-  -- mouseblame 依赖终端上报无按键的鼠标移动(xterm 1003 any-event). 终端不支持
-  -- 时它不会报错, 只是什么都不发生; 用 :MouseBlameDebug 判断, 用
-  -- :MouseBlameLine 或 gitsigns 的 <leader>ghb 查光标行代替.
+  -- mouseblame triggers on CursorHold. Mouse hover needs the terminal to report
+  -- motion without a button held (xterm 1003 any-event), which Warp does not do;
+  -- set source = "mouse" or "both" on a terminal that does.
   require("mouseblame").setup()
 
-  -- funcsig 走 treesitter 不走 LSP, 光标移动时重算不会给语言服务器加负担
+  -- funcsig reads treesitter rather than the LSP, so recomputing it on every
+  -- cursor move costs the language server nothing.
   require("funcsig").setup()
 end
 

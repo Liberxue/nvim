@@ -1,21 +1,22 @@
--- mouseblame: 光标停在某一行上, 浮窗显示这行的 git 提交信息
+-- mouseblame: the commit behind the line the cursor rests on.
 --
--- 触发源是 CursorHold, 不是鼠标. 鼠标悬停要求终端上报无按键的鼠标移动
--- (xterm 1003 any-event), Warp 不上报, :MouseBlameDebug 三秒内收不到任何
--- <MouseMove>. 所以默认走光标停留; 终端支持的话把 source 设成 "mouse" 或
--- "both" 就能同时用鼠标.
+-- Triggered by CursorHold, not the mouse. Mouse hover needs the terminal to
+-- report motion with no button held (xterm 1003 any-event); Warp does not, and
+-- :MouseBlameDebug sees no <MouseMove> at all there. Set source to "mouse" or
+-- "both" on a terminal that does report it.
 --
--- 停留时长取 'updatetime', LazyVim 已把它设为 200ms. 这里不动它, 那是全局设置,
--- trouble.nvim 等插件也挂在同一个事件上.
+-- The hold interval is 'updatetime', which LazyVim already sets to 200ms.
+-- Leaving it alone keeps trouble.nvim and anything else on that event
+-- unaffected.
 
 local M = {}
 
 local config = {
-  -- "cursor" 光标停留触发, "mouse" 鼠标悬停触发, "both" 两个都要
+  -- "cursor" on CursorHold, "mouse" on hover, "both" for either
   source = "cursor",
-  delay = 120, -- CursorHold 之后再等多久才发 git(ms), 吸收连续移动
+  delay = 120, -- ms after CursorHold before running git, to absorb fast movement
   max_width = 96,
-  body_lines = 8, -- commit message 正文最多显示几行
+  body_lines = 8, -- lines of commit body to show before truncating
   ignore_ft = { codemap = true, ["snacks_terminal"] = true, ["neo-tree"] = true, help = true },
 }
 
@@ -35,10 +36,10 @@ local uv = vim.uv or vim.loop
 
 local timer ---@type uv.uv_timer_t|nil
 local win, buf
-local last ---@type table|nil  上次查询的 {win, line}
+local last ---@type table|nil  {win, line} of the last query
 local job ---@type vim.SystemObj|nil
 local enabled = false
-local move_count = 0 -- 只给 :MouseBlameDebug 用
+local move_count = 0 -- only read by :MouseBlameDebug
 
 ---------------------------------------------------------------------------
 
@@ -71,28 +72,29 @@ M.hide = hide
 local function rel_time(ts)
   local d = os.time() - ts
   if d < 0 then
-    return "刚刚"
+    return "just now"
   elseif d < 60 then
-    return d .. " 秒前"
+    return d .. "s ago"
   elseif d < 3600 then
-    return math.floor(d / 60) .. " 分钟前"
+    return math.floor(d / 60) .. "m ago"
   elseif d < 86400 then
-    return math.floor(d / 3600) .. " 小时前"
+    return math.floor(d / 3600) .. "h ago"
   elseif d < 86400 * 30 then
-    return math.floor(d / 86400) .. " 天前"
+    return math.floor(d / 86400) .. " days ago"
   elseif d < 86400 * 365 then
-    return math.floor(d / (86400 * 30)) .. " 个月前"
+    return math.floor(d / (86400 * 30)) .. " months ago"
   else
-    return string.format("%.1f 年前", d / (86400 * 365))
+    return string.format("%.1f years ago", d / (86400 * 365))
   end
 end
 
---- 解析 git blame --porcelain 的单行输出
+--- Parse one line of git blame --porcelain output
 local function parse_porcelain(out)
   local info = {}
   for line in out:gmatch("[^\n]+") do
-    -- 首行形如 "<40 位 sha> <orig-line> <final-line> <num-lines>".
-    -- 注意 Lua 模式没有 {n} 重复计数, 只能靠 %x+ 加上后面两个数字来定位.
+    -- Header line is "<40-char sha> <orig-line> <final-line> <num-lines>".
+    -- Lua patterns have no {n} repetition, so the sha is anchored by the two
+    -- numbers that follow it rather than by its length.
     local sha = line:match("^(%x%x%x%x%x%x%x%x+)%s+%d+%s+%d+")
     if sha and not info.sha then
       info.sha = sha
@@ -122,7 +124,7 @@ local function eligible(b)
 end
 
 ---------------------------------------------------------------------------
--- 浮窗
+-- Popup
 ---------------------------------------------------------------------------
 
 --- rows: { {text, hl}, ... }
@@ -156,10 +158,10 @@ local function show(rows, anchor)
     })
   end
 
-  -- screenrow/screencol 是 1 基; relative=editor 的 row/col 是 0 基
-  local row = anchor.screenrow -- 放在鼠标下一行
+  -- screenrow/screencol are 1-based, relative=editor row/col are 0-based
+  local row = anchor.screenrow -- one line below the anchor
   if row + h + 2 > vim.o.lines then
-    row = math.max(0, anchor.screenrow - h - 3) -- 放不下就翻到上方
+    row = math.max(0, anchor.screenrow - h - 3) -- flip above when there is no room
   end
   local col = math.max(0, math.min(anchor.screencol - 1, vim.o.columns - w - 3))
 
@@ -180,7 +182,7 @@ local function show(rows, anchor)
 end
 
 ---------------------------------------------------------------------------
--- 查询
+-- Query
 ---------------------------------------------------------------------------
 
 local function enrich_body(dir, sha, rows, anchor)
@@ -198,7 +200,7 @@ local function enrich_body(dir, sha, rows, anchor)
       rows[#rows + 1] = { "", "MouseBlameBody" }
       for i, l in ipairs(body) do
         if i > config.body_lines then
-          rows[#rows + 1] = { ("… 还有 %d 行"):format(#body - config.body_lines), "MouseBlameBody" }
+          rows[#rows + 1] = { ("... %d more lines"):format(#body - config.body_lines), "MouseBlameBody" }
           break
         end
         rows[#rows + 1] = { l, "MouseBlameBody" }
@@ -218,12 +220,12 @@ local function blame(b, anchor)
     { text = true },
     vim.schedule_wrap(function(res)
       job = nil
-      -- 鼠标已经移开了
+      -- The cursor has moved on
       if not last or last.line ~= line then
         return
       end
       if res.code ~= 0 then
-        return -- 不在 git 仓库里、文件未跟踪等, 静默放过
+        return -- not a repo, file untracked, and so on; stay quiet
       end
       local info = parse_porcelain(res.stdout or "")
       if not info.sha then
@@ -231,7 +233,7 @@ local function blame(b, anchor)
       end
       local rows = {}
       if info.sha:match("^0+$") then
-        rows[#rows + 1] = { "未提交的改动", "MouseBlameWarn" }
+        rows[#rows + 1] = { "Uncommitted change", "MouseBlameWarn" }
       else
         rows[#rows + 1] = {
           ("%s  %s  %s (%s)"):format(
@@ -246,7 +248,7 @@ local function blame(b, anchor)
       end
       if modified then
         rows[#rows + 1] =
-          { "缓冲区有未保存改动, blame 按磁盘文件定位, 行号可能不一致", "MouseBlameWarn" }
+          { "Buffer modified; blame reads the file on disk, so lines may not line up", "MouseBlameWarn" }
       end
       show(rows, anchor)
       if not info.sha:match("^0+$") then
@@ -257,13 +259,13 @@ local function blame(b, anchor)
 end
 
 ---------------------------------------------------------------------------
--- 事件
+-- Events
 ---------------------------------------------------------------------------
 
 function M.on_move()
   move_count = move_count + 1
   local pos = vim.fn.getmousepos()
-  -- 鼠标落在自己的浮窗上就别动, 否则一进浮窗就闪没了
+  -- Ignore the popup itself, or entering it would dismiss it
   if win and pos.winid == win then
     return
   end
@@ -279,7 +281,7 @@ function M.on_move()
     return
   end
   if last and last.winid == pos.winid and last.line == pos.line then
-    return -- 还在同一行上, 不重复查
+    return -- same line, already queried
   end
   hide()
   last = { winid = pos.winid, line = pos.line, screenrow = pos.screenrow, screencol = pos.screencol }
@@ -297,15 +299,15 @@ function M.on_move()
   )
 end
 
---- CursorHold 触发: 查光标所在行. 比 M.line 多了防抖和去重, 光标还停在同一行
---- 时不会重复发 git.
+--- CursorHold entry point. Unlike M.line it debounces and deduplicates, so
+--- resting on one line does not run git more than once.
 function M.on_hold()
   if not enabled then
     return
   end
   local w = vim.api.nvim_get_current_win()
   if vim.api.nvim_win_get_config(w).relative ~= "" then
-    return -- 光标在浮窗里
+    return -- cursor is inside a floating window
   end
   local b = vim.api.nvim_win_get_buf(w)
   if not eligible(b) then
@@ -313,7 +315,7 @@ function M.on_hold()
   end
   local lnum = vim.api.nvim_win_get_cursor(w)[1]
   if last and last.winid == w and last.line == lnum then
-    return -- 这一行查过了
+    return -- this line is already shown
   end
   hide()
   last = { winid = w, line = lnum, screenrow = vim.fn.screenrow(), screencol = vim.fn.screencol() }
@@ -332,11 +334,11 @@ function M.on_hold()
   )
 end
 
---- 立即查光标所在行, 不等停留. 供 :MouseBlameLine 用.
+--- Query the cursor line at once, without waiting for a hold. Used by :MouseBlameLine.
 function M.line()
   local b = vim.api.nvim_get_current_buf()
   if not eligible(b) then
-    vim.notify("mouseblame: 当前 buffer 不是可 blame 的文件", vim.log.levels.WARN)
+    vim.notify("mouseblame: this buffer is not a file git can blame", vim.log.levels.WARN)
     return
   end
   local anchor = {
@@ -365,8 +367,8 @@ function M.enable()
     vim.api.nvim_create_autocmd("CursorHold", { group = g, callback = M.on_hold })
   end
 
-  -- CursorMoved 在 CursorHold 之前到. 只有真的换了行才清 last, 否则同一行上
-  -- 反复停留会反复发 git.
+  -- CursorMoved arrives before CursorHold. Clearing last only on a real line
+  -- change keeps repeated holds on one line from running git each time.
   vim.api.nvim_create_autocmd("CursorMoved", {
     group = g,
     callback = function()
@@ -402,19 +404,18 @@ end
 function M.toggle()
   if enabled then
     M.disable()
-    vim.notify("mouseblame: 已关闭", vim.log.levels.INFO)
+    vim.notify("mouseblame: off", vim.log.levels.INFO)
   else
     M.enable()
-    vim.notify("mouseblame: 已开启", vim.log.levels.INFO)
+    vim.notify("mouseblame: on", vim.log.levels.INFO)
   end
 end
 
---- 判断终端到底有没有把鼠标移动事件报上来
+--- Report whether the terminal sends mouse motion events at all
 function M.debug()
   if config.source == "cursor" then
     vim.notify(
-      "mouseblame: 当前触发源是光标停留(CursorHold), 不用鼠标.\n"
-        .. ' 要测鼠标先 setup({ source = "both" }).',
+      "mouseblame: triggering on CursorHold, not the mouse.\n" .. 'Set source = "both" first to test mouse hover.',
       vim.log.levels.INFO
     )
     return
@@ -423,16 +424,16 @@ function M.debug()
     M.enable()
   end
   local base = move_count
-  vim.notify("mouseblame: 3 秒内移动鼠标", vim.log.levels.INFO)
+  vim.notify("mouseblame: move the mouse within 3 seconds", vim.log.levels.INFO)
   vim.defer_fn(function()
     local got = move_count - base
     if got > 0 then
-      vim.notify(("mouseblame: 收到 %d 个 <MouseMove> 事件, 终端支持"):format(got), vim.log.levels.INFO)
+      vim.notify(("mouseblame: %d <MouseMove> events, this terminal reports motion"):format(got), vim.log.levels.INFO)
     else
       vim.notify(
-        "mouseblame: 3 秒内没有收到 <MouseMove> 事件.\n"
-          .. "终端不上报无按键的鼠标移动.\n"
-          .. "改用 :MouseBlameLine 或 gitsigns 的 <leader>ghb 查光标行.",
+        "mouseblame: no <MouseMove> in 3 seconds.\n"
+          .. "This terminal does not report motion without a button held.\n"
+          .. "Use :MouseBlameLine, or gitsigns <leader>ghb, for the cursor line.",
         vim.log.levels.WARN
       )
     end
@@ -448,9 +449,13 @@ function M.setup(opts)
   end
   defhl()
   vim.api.nvim_create_autocmd("ColorScheme", { callback = defhl })
-  vim.api.nvim_create_user_command("MouseBlameToggle", M.toggle, { desc = "开关鼠标悬停 git blame" })
-  vim.api.nvim_create_user_command("MouseBlameDebug", M.debug, { desc = "检测终端是否上报鼠标移动" })
-  vim.api.nvim_create_user_command("MouseBlameLine", M.line, { desc = "查光标所在行的 git 提交信息" })
+  vim.api.nvim_create_user_command("MouseBlameToggle", M.toggle, { desc = "Toggle inline git blame" })
+  vim.api.nvim_create_user_command(
+    "MouseBlameDebug",
+    M.debug,
+    { desc = "Check whether the terminal reports mouse motion" }
+  )
+  vim.api.nvim_create_user_command("MouseBlameLine", M.line, { desc = "Commit behind the cursor line" })
   M.enable()
 end
 

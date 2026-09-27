@@ -1,13 +1,14 @@
--- funcsig: 在窗口顶部常驻显示「光标当前在哪个函数里、它返回什么」
+-- funcsig: keeps the enclosing function's signature in the winbar.
 --
--- 用 treesitter 而不是 LSP: 纯本地语法查询, 不发请求、不受索引状态影响,
--- 光标移动时重算也不会给 rust-analyzer 添负担.
+-- Reads treesitter rather than the LSP. A local syntax query sends no request
+-- and does not care whether the index is ready, so recomputing it on every
+-- cursor move costs rust-analyzer nothing.
 
 local M = {}
 
 local config = {
-  sep = "  ·  ", -- impl 与 fn 之间的分隔
-  max_ratio = 1.0, -- 最多占窗口宽度的多少
+  sep = "  ·  ", -- between the impl context and the signature
+  max_ratio = 1.0, -- fraction of the window width the bar may use
 }
 
 local HLS = {
@@ -15,7 +16,7 @@ local HLS = {
   FuncSigCtx = { link = "Comment" },
 }
 
--- 各语言里「函数」节点的类型名
+-- Node types that count as a function, across languages
 local FN = {
   function_item = true, -- rust
   function_declaration = true, -- go / js / zig
@@ -26,9 +27,9 @@ local FN = {
   function_expression = true,
   arrow_function = true,
 }
--- 闭包只在找不到真正的函数时兜底
+-- Closures are a fallback, used only when no named function encloses the cursor
 local CLOSURE = { closure_expression = true, lambda = true }
--- 往上再找一层的上下文(impl / class / trait)
+-- One level further up: the impl, class or trait the function belongs to
 local CTX = {
   impl_item = true,
   trait_item = true,
@@ -49,7 +50,7 @@ local function node_text(buf, node)
   return (table.concat(lines, " "):gsub("%s+", " "))
 end
 
---- 函数节点 → 只要签名那段(到 body 之前)
+--- Function node to just its signature, stopping where the body starts
 local function signature(buf, node)
   local body = node:field("body")[1]
   local sr, sc = node:range()
@@ -65,7 +66,7 @@ local function signature(buf, node)
     return nil
   end
   local s = table.concat(lines, " "):gsub("%s+", " ")
-  s = s:gsub("%s*[{:]%s*$", "") -- 去掉结尾的 { 或 python 的 :
+  s = s:gsub("%s*[{:]%s*$", "") -- trailing { , or : in python
   s = vim.trim(s)
   return s ~= "" and s or nil
 end
@@ -100,7 +101,7 @@ local function compute(buf, win)
   if not sig then
     return nil
   end
-  -- 再往上找 impl / class 之类的上下文
+  -- Walk up for an impl or class to prefix the signature with
   local ctx
   local p = fn:parent()
   while p do
@@ -116,7 +117,7 @@ local function compute(buf, win)
   return ctx, sig
 end
 
---- winbar 走的是 statusline 语法, % 必须转义
+--- winbar uses statusline syntax, so % has to be escaped
 local function esc(s)
   return (s:gsub("%%", "%%%%"))
 end
@@ -131,7 +132,7 @@ function M.refresh()
   end
   local win = vim.api.nvim_get_current_win()
   if vim.api.nvim_win_get_config(win).relative ~= "" then
-    return -- 浮窗不管
+    return -- floating windows have no winbar
   end
   local buf = vim.api.nvim_win_get_buf(win)
   if not eligible(buf) then
@@ -177,10 +178,10 @@ function M.toggle()
   enabled = not enabled
   if enabled then
     M.refresh()
-    vim.notify("funcsig: 已开启", vim.log.levels.INFO)
+    vim.notify("funcsig: on", vim.log.levels.INFO)
   else
     M.clear()
-    vim.notify("funcsig: 已关闭", vim.log.levels.INFO)
+    vim.notify("funcsig: off", vim.log.levels.INFO)
   end
 end
 
@@ -206,7 +207,7 @@ function M.setup(opts)
       cache[tonumber(a.match)] = nil
     end,
   })
-  vim.api.nvim_create_user_command("FuncSigToggle", M.toggle, { desc = "开关顶部函数签名栏" })
+  vim.api.nvim_create_user_command("FuncSigToggle", M.toggle, { desc = "Toggle the function signature winbar" })
 end
 
 return M

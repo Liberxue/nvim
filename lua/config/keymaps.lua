@@ -4,10 +4,10 @@
 
 require("config.modules").setup()
 
--- <C-j> 开关浮动终端, cwd 取项目根.
--- 覆盖了 LazyVim 默认的「切到下方窗口」, 原功能仍可用内置的 <C-w>j.
--- 终端模式下也绑了, 所以 Ctrl-J 不再透传给 shell; 要把它留给 shell 就删掉 "t",
--- 改用 LazyVim 自带的 <C-/> 退出终端.
+-- Floating terminal rooted at the project. This takes <C-j> away from
+-- LazyVim's window-down mapping; <C-w>j still does that.
+-- Bound in terminal mode too, so Ctrl-J no longer reaches the shell. Drop the
+-- "t" below to give it back and use LazyVim's <C-/> to leave the terminal.
 vim.keymap.set({ "n", "t" }, "<C-j>", function()
   Snacks.terminal.toggle(nil, { cwd = LazyVim.root() })
 end, { desc = "Terminal (Root Dir)" })

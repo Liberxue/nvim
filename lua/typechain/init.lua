@@ -1,18 +1,21 @@
--- typechain: 显示光标所在行每个子表达式的类型
+-- typechain: the type of every sub-expression on the current line.
 --
--- 关键点: LSP 标准的 textDocument/hover 只接受一个「位置」, 在
--- `line.split(',').map(f).collect()` 上无论点哪里都只会得到 `line` 的类型.
--- rust-analyzer 支持一个非标准扩展 —— position 传一个 Range 时, 返回的是
--- 那一段表达式的类型. 本模块就是靠这个把整条链拆出来的.
+-- Standard textDocument/hover takes a single position, so on
+-- `line.split(',').map(f).collect()` every position in the chain answers with
+-- the type of `line`. rust-analyzer accepts a Range where the spec says
+-- position, and answers with the type of that span; the whole module rests on
+-- that extension. A server without it degrades to answering by start position:
+-- less useful, not an error.
 --
--- 子表达式由 treesitter 提供, 所以换语言只要改 IGNORE/ACCEPT 规则.
+-- Sub-expressions come from treesitter, so another language needs only new
+-- ACCEPT entries.
 
 local M = {}
 
 local config = {
-  max_items = 16, -- 一行最多查多少个子表达式
+  max_items = 16, -- sub-expressions queried per line
   max_width = 110,
-  max_expr = 44, -- 表达式文本显示宽度上限
+  max_expr = 44, -- display width for the expression column
   timeout = 3000,
 }
 
@@ -53,7 +56,7 @@ local function cut(text, width)
   return vim.fn.strcharpart(text, 0, lo) .. "…"
 end
 
---- treesitter 给的是字节列, LSP 可能要 utf-16
+--- treesitter counts bytes, the LSP may want utf-16
 local function to_enc(buf, line, byte_col, enc)
   if enc == "utf-8" then
     return byte_col
@@ -67,7 +70,7 @@ local function to_enc(buf, line, byte_col, enc)
   return ok and idx or byte_col
 end
 
---- 从 hover 结果里抠出类型
+--- Pull the type out of a hover response
 local function extract_type(contents)
   local v = type(contents) == "string" and contents or (contents and contents.value or "")
   if v == "" then
@@ -92,7 +95,7 @@ local function extract_type(contents)
 end
 
 ---------------------------------------------------------------------------
--- 选出这一行上值得查的子表达式
+-- Pick the sub-expressions on this line worth querying
 ---------------------------------------------------------------------------
 
 local ACCEPT = {
@@ -130,20 +133,21 @@ local function collect(buf, lnum)
     if sr > lnum or er < lnum then
       return
     end
-    -- 只要完整落在这一行里的节点, 跨行的表达式没法在一行里展示
+    -- Nodes contained in this line. A multi-line expression has nothing to show here.
     if sr == lnum and er == lnum and ACCEPT[n:type()] then
       local parent = n:parent()
       local pt = parent and parent:type() or ""
       local skip = false
-      -- `line.split` 这种「调用的函数部分」, 类型和它的接收者链完全一样, 是冗余
+      -- The callee half of a call, `line.split`, has the same type as the
+      -- receiver chain around it
       if n:type() == "field_expression" and pt == "call_expression" then
         skip = true
       end
-      -- `str::trim` 里的 `str` / `trim`
+      -- `str` and `trim` inside `str::trim`
       if pt == "scoped_identifier" then
         skip = true
       end
-      -- 字段名本身(.split 的 split)
+      -- The field name itself, the `split` in `.split`
       if parent and parent:field("field")[1] == n then
         skip = true
       end
@@ -171,7 +175,7 @@ end
 ---------------------------------------------------------------------------
 
 local win, buf
-local anchor_line -- 浮窗对应的行号, 光标离开这一行才关
+local anchor_line -- line the popup describes; it closes when the cursor leaves it
 
 function M.close()
   anchor_line = nil
@@ -217,7 +221,7 @@ local function show(rows, lnum)
     end
   end
 
-  -- 光标下方放不下就翻到上方
+  -- Flip above the cursor when there is no room below
   local below = vim.fn.winheight(0) - vim.fn.winline()
   local anchor, row = "NW", 1
   if below < h + 2 and vim.fn.winline() > h + 2 then
@@ -235,7 +239,7 @@ local function show(rows, lnum)
     focusable = false,
     noautocmd = true,
     zindex = 150,
-    title = " 表达式类型链 ",
+    title = " Type chain ",
     title_pos = "left",
   })
   vim.wo[win].wrap = false
@@ -245,8 +249,10 @@ local function show(rows, lnum)
   vim.api.nvim_create_autocmd("CursorMoved", {
     group = g,
     callback = function()
-      -- 同一行内左右移动不关. 注册这个 autocmd 时浮窗可能还没画出来(show 在异步
-      -- 回调里), 用 once 会被中间任何一次光标扰动消耗掉, 表现为按了键没反应.
+      -- Moving within the line keeps the popup. This autocmd is registered
+      -- before the popup is drawn, since show() runs from an async callback,
+      -- so a once = true handler got consumed by any jitter in between and
+      -- the popup closed the moment it appeared.
       if anchor_line and vim.api.nvim_win_get_cursor(0)[1] ~= anchor_line then
         M.close()
       end
@@ -264,14 +270,14 @@ function M.open()
   local b = vim.api.nvim_get_current_buf()
   local client = vim.lsp.get_clients({ bufnr = b, method = "textDocument/hover" })[1]
   if not client then
-    vim.notify("typechain: 当前缓冲区没有挂载支持 hover 的 LSP", vim.log.levels.WARN)
+    vim.notify("typechain: no LSP client with hover on this buffer", vim.log.levels.WARN)
     return
   end
   local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
   local src = vim.api.nvim_buf_get_lines(b, lnum, lnum + 1, false)[1] or ""
   local items = collect(b, lnum)
   if #items == 0 then
-    vim.notify("typechain: 这一行没有可查询的表达式", vim.log.levels.INFO)
+    vim.notify("typechain: no expression on this line", vim.log.levels.INFO)
     return
   end
   if #items > config.max_items then
@@ -287,7 +293,8 @@ function M.open()
     local rows, stack = {}, {}
     for _, it in ipairs(items) do
       local text = src:sub(it.sc + 1, it.ec)
-      -- 链式调用: 和上一条同起点且是它的扩展时, 缩进并只显示增量
+      -- A chained call shares its start with the previous entry and extends
+      -- it; indent and show only the added segment
       local depth, disp = 0, text
       for j = #stack, 1, -1 do
         local prev = stack[j]
@@ -333,7 +340,7 @@ function M.open()
     end, b)
   end
 
-  -- 慢的话先把已有的画出来, 别干等
+  -- Draw what has arrived rather than waiting on a slow server
   vim.defer_fn(function()
     if not done then
       done = true
@@ -351,7 +358,7 @@ function M.setup(opts)
   end
   defhl()
   vim.api.nvim_create_autocmd("ColorScheme", { callback = defhl })
-  vim.api.nvim_create_user_command("TypeChain", M.open, { desc = "显示当前行每个子表达式的类型" })
+  vim.api.nvim_create_user_command("TypeChain", M.open, { desc = "Type of every sub-expression on the current line" })
 end
 
 return M
