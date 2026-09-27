@@ -171,8 +171,11 @@ end
 ---------------------------------------------------------------------------
 
 local win, buf
+local anchor_line -- 浮窗对应的行号, 光标离开这一行才关
 
 function M.close()
+  anchor_line = nil
+  pcall(vim.api.nvim_del_augroup_by_name, "typechain_close")
   if win and vim.api.nvim_win_is_valid(win) then
     pcall(vim.api.nvim_win_close, win, true)
   end
@@ -180,8 +183,9 @@ function M.close()
 end
 
 --- rows: { {parts = {{text, hl}, ...}}, ... }
-local function show(rows)
+local function show(rows, lnum)
   M.close()
+  anchor_line = lnum
   local texts, spans = {}, {}
   for i, r in ipairs(rows) do
     local t, sp, col = "", {}, 0
@@ -237,8 +241,19 @@ local function show(rows)
   vim.wo[win].wrap = false
   vim.wo[win].winhighlight = "Normal:TypeChainNormal,FloatBorder:TypeChainBorder"
 
-  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "InsertEnter", "BufLeave", "WinScrolled" }, {
-    once = true,
+  local g = vim.api.nvim_create_augroup("typechain_close", { clear = true })
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    group = g,
+    callback = function()
+      -- 同一行内左右移动不关. 注册这个 autocmd 时浮窗可能还没画出来(show 在异步
+      -- 回调里), 用 once 会被中间任何一次光标扰动消耗掉, 表现为按了键没反应.
+      if anchor_line and vim.api.nvim_win_get_cursor(0)[1] ~= anchor_line then
+        M.close()
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "InsertEnter", "BufLeave", "WinScrolled" }, {
+    group = g,
     callback = M.close,
   })
 end
@@ -295,7 +310,7 @@ function M.open()
       parts[#parts + 1] = it.ty and { it.ty, "TypeChainType" } or { "…", "TypeChainDim" }
       rows[#rows + 1] = parts
     end
-    show(rows)
+    show(rows, lnum + 1)
   end
 
   for _, it in ipairs(items) do
@@ -311,7 +326,7 @@ function M.open()
       if not err and result then
         it.ty = extract_type(result.contents)
       end
-      if not done and (pending == 0) then
+      if not done and pending == 0 then
         done = true
         render()
       end
