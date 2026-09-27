@@ -1,8 +1,11 @@
-tt.*
-.tests
-doc/tags
-debug
-.repro
-foo.*
+# 注意: lazy-lock.json 和 lazyvim.json 必须提交, 它们决定了新机器上装出来的
+# 插件版本和启用的 extras. 不要加进来.
+.DS_Store
 *.log
-data
+tt.*
+foo.*
+.tests
+.repro
+doc/tags
+spell/
+shada/
