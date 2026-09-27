@@ -38,40 +38,59 @@ return {
       set_highlights()
       vim.api.nvim_create_autocmd("ColorScheme", { callback = set_highlights })
     end,
-    opts = {
-      render = {
-        -- Drop the type. The value already carries the shape for Rust:
-        -- Some(60), "hello", size=3, (60, 5). Set this to a positive number to
-        -- truncate instead, or -1 to print types in full.
-        max_type_length = 0,
-        max_value_lines = 100,
-        indent = 2,
-      },
-      -- Press this on a line too long for the panel to read it in a float.
-      expand_lines = true,
-      layouts = {
-        {
-          position = "left",
-          -- A fraction of the window rather than a column count, so it holds up
-          -- on a laptop screen as well as a wide one.
-          size = 0.3,
-          elements = {
-            -- Scopes is what gets read; the rest are reference.
-            { id = "scopes", size = 0.55 },
-            { id = "watches", size = 0.2 },
-            { id = "stacks", size = 0.15 },
-            { id = "breakpoints", size = 0.1 },
-          },
-        },
-        {
-          position = "bottom",
-          size = 12,
-          elements = {
-            { id = "repl", size = 0.5 },
-            { id = "console", size = 0.5 },
-          },
-        },
-      },
+    -- stylua: ignore
+    keys = {
+      { "<leader>dA", function() require("dapui").toggle({ layout = 3 }) end, desc = "Toggle Disassembly" },
     },
+    opts = function(_, opts)
+      -- The element has to exist before setup validates the layout that names
+      -- it, and dap-ui refuses a layout referring to an unknown element.
+      require("dapdisasm").setup()
+      return vim.tbl_deep_extend("force", opts or {}, {
+        render = {
+          -- Drop the type. The value already carries the shape for Rust:
+          -- Some(60), "hello", size=3, (60, 5). Set this to a positive number to
+          -- truncate instead, or -1 to print types in full.
+          max_type_length = 0,
+          max_value_lines = 100,
+          indent = 2,
+        },
+        -- Press this on a line too long for the panel to read it in a float.
+        expand_lines = true,
+        layouts = {
+          {
+            position = "left",
+            -- A fraction of the window rather than a column count, so it holds up
+            -- on a laptop screen as well as a wide one.
+            size = 0.3,
+            elements = {
+              -- Scopes is what gets read; the rest are reference.
+              { id = "scopes", size = 0.55 },
+              { id = "watches", size = 0.2 },
+              { id = "stacks", size = 0.15 },
+              { id = "breakpoints", size = 0.1 },
+            },
+          },
+          {
+            position = "bottom",
+            size = 12,
+            elements = {
+              { id = "repl", size = 0.5 },
+              { id = "console", size = 0.5 },
+            },
+          },
+          -- Layout 3: the disassembly around the program counter, alongside the
+          -- source the way godbolt puts them. <leader>dA toggles it on its own
+          -- when the width is better spent on code.
+          {
+            position = "right",
+            size = 0.34,
+            elements = {
+              { id = "disassembly", size = 1.0 },
+            },
+          },
+        },
+      })
+    end,
   },
 }
