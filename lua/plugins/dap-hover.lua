@@ -36,6 +36,32 @@ return {
         mode = "v",
         desc = "Eval Selection",
       },
+      {
+        -- A wrapper prints its bookkeeping, not its contents: an Arc shows
+        -- strong/weak counts and a MutexGuard shows the lock address, while the
+        -- number sits several levels below. Expanding that far by hand takes
+        -- three clicks per variable. `frame variable --depth` prints the whole
+        -- chain at once, down to `data = (value = 1)`.
+        --
+        -- Field paths do not reach there: the Rust formatters expose synthetic
+        -- children that an expression cannot address, so `counter.data.data`
+        -- answers "Attribute 'data' is not defined".
+        "<leader>dV",
+        function()
+          local session = require("dap").session()
+          if not session then
+            vim.notify("no debug session", vim.log.levels.WARN)
+            return
+          end
+          local word = vim.fn.expand("<cword>")
+          if word == "" then
+            return
+          end
+          require("dap").repl.open()
+          session:evaluate("frame variable --depth 5 " .. word, function() end)
+        end,
+        desc = "Inspect Deeply (unwrap Arc/Mutex)",
+      },
     },
   },
 }
