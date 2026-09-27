@@ -37,7 +37,8 @@ from a running nvim. The local modules are reached through:
 | --- | --- |
 | `gt` | type of every sub-expression on the current line |
 | `<leader>cg` | call hierarchy for the symbol under the cursor |
-| cursor hold | commit behind the current line |
+| cursor hold | signature and docs for the symbol under the cursor |
+| `:MouseBlameLine` | commit behind the current line |
 | winbar | signature of the enclosing function |
 
 ## Local modules
@@ -96,28 +97,44 @@ adds, so the differences are not buried in a shared prefix.
 A server without the Range extension degrades to answering by start position:
 less useful, not an error.
 
+### hoverdoc
+
+Signature and documentation for the symbol under the cursor, shown when the
+cursor rests for 200ms:
+
+```
+transport_decision::logging
+pub fn enter_request_mdc(tenant: impl Into<String>, ...) -> RequestMdcGuard
+
+Writes the request MDC for this thread. The guard clears it when the scope
+ends, so a reused worker thread cannot carry one request's context into
+the next.
+```
+
+`K` opens the full hover window; this is the short version and never takes
+focus. It skips whitespace and punctuation, closes as soon as the cursor moves,
+and drops rust-analyzer's notable-traits line, which says nothing at this size.
+`:HoverDocToggle` turns it off.
+
 ### mouseblame
 
-The commit behind the line the cursor rests on, after 200ms.
+The commit behind a line, through `:MouseBlameLine`.
 
 `git blame -L n,n --porcelain` fetches sha, author, time and subject
 asynchronously and draws once; `git log -1 --format=%b` then appends the commit
 body and the popup grows. A modified buffer gets a warning that the line numbers
 may not line up, since blame reads the file on disk.
 
-The trigger is CursorHold. Mouse hover needs the terminal to report motion with
-no button held (xterm 1003 any-event), which Warp does not do -- there
-`:MouseBlameDebug` sees no `<MouseMove>` at all. On a terminal that does report
-it, `setup({ source = "both" })` enables both.
-
-Also: `:MouseBlameLine` queries the cursor line without waiting,
-`:MouseBlameToggle` turns it off.
+Nothing fires on its own. The gitsigns annotation at the end of the line covers
+the glanceable case, and CursorHold belongs to hoverdoc. Set
+`setup({ source = "cursor" })` to bring the automatic popup back, or `"mouse"`
+on a terminal that reports motion with no button held (xterm 1003 any-event) --
+Warp does not, and `:MouseBlameDebug` sees no `<MouseMove>` there at all.
 
 gitsigns annotates the end of the cursor line with author and summary, which is
-the other half of what GitLens shows. Both fire on the same CursorHold; the
-annotation is glanceable and the popup adds the commit body. Drop either with
-`:Gitsigns toggle_current_line_blame` or `:MouseBlameToggle`. `<leader>gH` lists
-the commits that touched the current line, `<leader>gf` the whole file.
+the other half of what GitLens shows. `<leader>gH` lists the commits that
+touched the current line, `<leader>gf` the whole file. Turn the annotation off
+with `:Gitsigns toggle_current_line_blame`.
 
 ### funcsig
 
@@ -168,6 +185,7 @@ lua/config/autocmds.lua  autocmds
 lua/plugins/             plugin overrides
 lua/codemap/             local modules
 lua/typechain/
+lua/hoverdoc/
 lua/mouseblame/
 lua/funcsig/
 scripts/bootstrap.sh     install on a new machine

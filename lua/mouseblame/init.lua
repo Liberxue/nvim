@@ -1,19 +1,21 @@
--- mouseblame: the commit behind the line the cursor rests on.
+-- mouseblame: the commit behind a line, on demand.
 --
--- Triggered by CursorHold, not the mouse. Mouse hover needs the terminal to
--- report motion with no button held (xterm 1003 any-event); Warp does not, and
--- :MouseBlameDebug sees no <MouseMove> at all there. Set source to "mouse" or
--- "both" on a terminal that does report it.
+-- Nothing fires on its own. The end-of-line annotation from gitsigns covers the
+-- glanceable case, and CursorHold belongs to hoverdoc, which answers the
+-- question asked far more often while reading code: what is this and what does
+-- it return. This popup carries more than the annotation does -- absolute time
+-- and the commit body -- so it stays available through :MouseBlameLine.
 --
--- The hold interval is 'updatetime', which LazyVim already sets to 200ms.
--- Leaving it alone keeps trouble.nvim and anything else on that event
--- unaffected.
+-- Set source to "cursor" to bring back the CursorHold popup, or "mouse" on a
+-- terminal that reports motion with no button held (xterm 1003 any-event);
+-- Warp does not, and :MouseBlameDebug sees no <MouseMove> there at all.
 
 local M = {}
 
 local config = {
-  -- "cursor" on CursorHold, "mouse" on hover, "both" for either
-  source = "cursor",
+  -- "off" for :MouseBlameLine only, "cursor" on CursorHold, "mouse" on hover,
+  -- "both" for either
+  source = "off",
   delay = 120, -- ms after CursorHold before running git, to absorb fast movement
   max_width = 96,
   body_lines = 8, -- lines of commit body to show before truncating

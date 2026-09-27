@@ -14,11 +14,12 @@ Generated from a running nvim, so it matches what is actually bound.
 | `<leader>cg` | call hierarchy for the symbol under the cursor |
 | `<C-j>` | floating terminal, in normal and terminal mode |
 
-Resting the cursor on a line for 200ms shows the commit behind it. No key
-needed.
+Resting the cursor on a symbol for 200ms shows its signature and documentation.
+No key needed. Git history stays out of the way: the end of the line carries
+author and summary, and `:MouseBlameLine` opens the full commit.
 
-Commands: `:TypeChain` `:CodeMap` `:MouseBlameLine` `:MouseBlameToggle`
-`:MouseBlameDebug` `:FuncSigToggle`
+Commands: `:TypeChain` `:CodeMap` `:HoverDocToggle` `:MouseBlameLine`
+`:MouseBlameToggle` `:MouseBlameDebug` `:FuncSigToggle`
 
 ## Overridden defaults
 

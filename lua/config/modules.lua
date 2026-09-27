@@ -2,7 +2,8 @@
 --
 --   codemap     <leader>cg   call hierarchy for the symbol under the cursor
 --   typechain   gt           type of every sub-expression on the current line
---   mouseblame  cursor hold  commit behind the current line
+--   hoverdoc    cursor hold  signature and docs for the symbol under the cursor
+--   mouseblame  on demand    commit behind a line, :MouseBlameLine
 --   funcsig     winbar       signature of the enclosing function
 --
 -- Plain lua modules rather than lazy.nvim local plugin specs: all four would
@@ -29,9 +30,12 @@ function M.setup()
 
   -- Event-driven, so their autocmds have to be installed at startup.
   --
-  -- mouseblame triggers on CursorHold. Mouse hover needs the terminal to report
-  -- motion without a button held (xterm 1003 any-event), which Warp does not do;
-  -- set source = "mouse" or "both" on a terminal that does.
+  -- hoverdoc owns CursorHold. K opens the full hover window; this one is the
+  -- short version and never takes focus.
+  require("hoverdoc").setup()
+
+  -- mouseblame stays on demand. Git history that pops up unasked while reading
+  -- code gets in the way, and gitsigns already annotates the end of the line.
   require("mouseblame").setup()
 
   -- funcsig reads treesitter rather than the LSP, so recomputing it on every
