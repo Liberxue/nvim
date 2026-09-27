@@ -20,44 +20,52 @@
 local storage = vim.fn.stdpath("data") .. "/leetcode"
 
 -- Declarations LeetCode provides on its side but the downloaded snippet omits.
+-- Declarations LeetCode provides on its side but the downloaded snippet omits.
+--
+-- Wrapped in a module so only the three types reach the solution's scope. The
+-- submitted region is what sits between the `@leet` markers and nothing else --
+-- not this preamble, not an imports section -- so anything the solution relies
+-- on has to be imported inside it, exactly as on LeetCode. A top-level
+-- `use std::collections::*` here would resolve HashMap locally and let a
+-- submission fail on their compiler for a missing import that never showed up
+-- in the editor.
 local preamble = {
-  -- Inner attribute, so it has to lead the file. Nothing may precede it, which
-  -- is why the imports below live here rather than in the injector's `imports`
-  -- field: that field would be emitted as its own section above this one.
   "#![allow(dead_code, unused_variables, unused_mut, unused_imports)]",
   "",
-  "use std::cell::RefCell;",
-  "use std::collections::*;",
-  "use std::rc::Rc;",
+  "mod leet_prelude {",
+  "    use std::cell::RefCell;",
+  "    use std::rc::Rc;",
   "",
-  "pub struct Solution;",
+  "    pub struct Solution;",
   "",
-  "#[derive(PartialEq, Eq, Clone, Debug)]",
-  "pub struct ListNode {",
-  "    pub val: i32,",
-  "    pub next: Option<Box<ListNode>>,",
-  "}",
+  "    #[derive(PartialEq, Eq, Clone, Debug)]",
+  "    pub struct ListNode {",
+  "        pub val: i32,",
+  "        pub next: Option<Box<ListNode>>,",
+  "    }",
   "",
-  "impl ListNode {",
-  "    #[inline]",
-  "    fn new(val: i32) -> Self {",
-  "        ListNode { next: None, val }",
+  "    impl ListNode {",
+  "        #[inline]",
+  "        pub fn new(val: i32) -> Self {",
+  "            ListNode { next: None, val }",
+  "        }",
+  "    }",
+  "",
+  "    #[derive(Debug, PartialEq, Eq)]",
+  "    pub struct TreeNode {",
+  "        pub val: i32,",
+  "        pub left: Option<Rc<RefCell<TreeNode>>>,",
+  "        pub right: Option<Rc<RefCell<TreeNode>>>,",
+  "    }",
+  "",
+  "    impl TreeNode {",
+  "        #[inline]",
+  "        pub fn new(val: i32) -> Self {",
+  "            TreeNode { val, left: None, right: None }",
+  "        }",
   "    }",
   "}",
-  "",
-  "#[derive(Debug, PartialEq, Eq)]",
-  "pub struct TreeNode {",
-  "    pub val: i32,",
-  "    pub left: Option<Rc<RefCell<TreeNode>>>,",
-  "    pub right: Option<Rc<RefCell<TreeNode>>>,",
-  "}",
-  "",
-  "impl TreeNode {",
-  "    #[inline]",
-  "    pub fn new(val: i32) -> Self {",
-  "        TreeNode { val, left: None, right: None }",
-  "    }",
-  "}",
+  "use leet_prelude::*;",
 }
 
 --- One bin target per solution file. Names come from the filename, which
